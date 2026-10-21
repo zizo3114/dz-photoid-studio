@@ -111,11 +111,34 @@
       @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .steps { grid-template-columns: 1fr; } }
       .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
       .card-head h2 { margin: 0; }
+      .card-head h2 small { color: var(--muted); font-size: .85rem; font-weight: 500; }
       .mini-btn {
         min-height: 40px; padding: 6px 12px; border-radius: 8px; font-size: .92rem; font-weight: 700;
         background: var(--field); border: 1px solid var(--line); color: var(--ink); cursor: pointer;
       }
       .mini-btn:hover { background: var(--line); }
+      .mini-btn.danger { color: var(--danger); }
+
+      /* ---------- Batch photo list ---------- */
+      .photo-item {
+        display: flex; gap: 12px; align-items: center;
+        border: 2px solid var(--line); border-radius: 12px;
+        padding: 10px; margin-top: 10px; background: var(--field); cursor: pointer;
+      }
+      .photo-item.active { border-color: var(--accent); background: var(--accent-soft); }
+      .photo-item canvas {
+        width: 62px; height: auto; border-radius: 6px; flex: none;
+        border: 1px solid var(--line); background: #fff;
+      }
+      .photo-meta { flex: 1; min-width: 0; }
+      .photo-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .photo-tags { color: var(--muted); font-size: .85rem; }
+      .copies-wrap { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-weight: 500; font-size: .95rem; }
+      .copies-input {
+        width: 78px; min-height: 40px; padding: 6px 8px; border-radius: 8px;
+        border: 1px solid var(--line); background: var(--card); color: var(--ink);
+        font-size: 1rem; font-family: inherit; text-align: center;
+      }
 
       /* ---------- Editor stage ---------- */
       .stage {
@@ -198,7 +221,10 @@
       .sheet-preview canvas {
         max-width: 100%; height: auto; background: #fff;
         box-shadow: 0 2px 10px rgba(0,0,0,.18); border: 1px solid #ccc;
+        margin-bottom: 12px;
       }
+      .sheet-preview canvas:last-of-type { margin-bottom: 0; }
+      .more-sheets { color: var(--muted); font-weight: 700; margin: 8px 0 0; }
       .sheet-info { color: var(--muted); font-size: .93rem; margin-top: 10px; font-weight: 500; }
       .downloads { display: grid; gap: 10px; margin-top: 14px; }
       .downloads .btn { width: 100%; }
@@ -232,40 +258,41 @@
         body { background: #fff; }
         body > .wrap, body > .toast { display: none !important; }
         #printArea { display: block; }
-        #printArea img { display: block; }
+        #printArea img { display: block; page-break-after: always; }
+        #printArea img:last-child { page-break-after: auto; }
       }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1>صانع صور الهوية</h1>
-      <p class="sub">صورة هوية جزائرية بالمقاس الرسمي 3.5 × 4.5 سم، جاهزة للطباعة بدقة 300 DPI.</p>
+      <p class="sub">صورة هوية جزائرية بالمقاس الرسمي 3.5 × 4.5 سم، جاهزة للطباعة بدقة 300 DPI. يمكنك إضافة عدة صور دفعة واحدة وضبط كل واحدة على حدة.</p>
 
       <!-- ===== Empty state ===== -->
       <section class="card" id="emptyState">
-        <h2>اصنع صورتك في 3 خطوات بسيطة</h2>
+        <h2>اصنع صورك في 3 خطوات بسيطة</h2>
         <div class="steps">
-          <div class="step"><span class="num">1</span><p>ارفع صورة واضحة لوجهك</p></div>
-          <div class="step"><span class="num">2</span><p>اضبط وجهك داخل الإطار</p></div>
-          <div class="step"><span class="num">3</span><p>حمّل الصورة واطبع الورقة</p></div>
+          <div class="step"><span class="num">1</span><p>ارفع صورة أو عدة صور دفعة واحدة</p></div>
+          <div class="step"><span class="num">2</span><p>اضبط كل صورة داخل الإطار</p></div>
+          <div class="step"><span class="num">3</span><p>حمّل الصور واطبع الأوراق</p></div>
         </div>
-        <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="اختر صورة">
+        <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="اختر صورة أو عدة صور">
           <svg class="dz-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="2.6"/>
             <path d="M5.5 17.5c1.4-1.9 3.7-3 6.5-3s5.1 1.1 6.5 3"/><path d="M12 2.8v2.4M12 3.6l-1.2 1.2M12 3.6l1.2 1.2" opacity="0"/>
             <path d="M17.5 2.5v3M16 4h3" />
           </svg>
-          <p class="big">اسحب صورتك وأفلتها هنا</p>
-          <p class="small">أو اضغط لاختيار صورة من جهازك — JPG أو PNG أو WebP</p>
+          <p class="big">اسحب صورك وأفلتها هنا</p>
+          <p class="small">أو اضغط لاختيار صورة أو عدة صور من جهازك — JPG أو PNG أو WebP</p>
         </div>
-        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden />
-        <p class="note">تُعالج الصورة داخل متصفحك على جهازك فقط، ولا تُرسل إلى أي خادم.</p>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" multiple hidden />
+        <p class="note">تُعالج الصور داخل متصفحك على جهازك فقط، ولا تُرسل إلى أي خادم.</p>
       </section>
 
       <!-- ===== Workspace ===== -->
       <div id="workspace" hidden>
       <section class="card" id="smartCard">
-        <h2>خطوات ذكية تلقائية</h2>
+        <h2>خطوات ذكية تلقائية <small style="color:var(--muted);font-size:.85rem;font-weight:500">(تُطبَّق على الصورة المختارة في الأسفل)</small></h2>
         <div class="smart-step">
           <button class="btn smart-btn" id="smartCropBtn" type="button">١ — قصّ ذكي تلقائي</button>
           <p class="smart-desc">يكشف الوجه، ويسوّي ميلان الرأس من خطّ العينين، ويضبط حجم الرأس وموضع العينين حسب المقاس الرسمي — وبعده يمكنك التحسين يدوياً بالسحب والتكبير في الأسفل.</p>
@@ -283,14 +310,25 @@
             <button class="mini-btn" id="bgUndoBtn" type="button" hidden>التراجع — إعادة الصورة الأصلية</button>
           </div>
         </div>
-        <p class="note" style="text-align:start">٣ — بعد الضبط، حمّل الصورة أو ورقة الطباعة من قسم التحميل بالأسفل. كل المعالجة تتم على جهازك فقط، ولا تُرسل صورتك إلى أي خادم.</p>
+        <p class="note" style="text-align:start">٣ — بعد الضبط، حمّل الصور أو أوراق الطباعة من قسم التحميل بالأسفل. كل المعالجة تتم على جهازك فقط، ولا تُرسل صورك إلى أي خادم.</p>
       </section>
+
+      <!-- ===== Batch photo list ===== -->
+      <section class="card" id="batchCard">
+        <div class="card-head">
+          <h2>صور الدفعة (<span id="photoCount">0</span>)</h2>
+          <button class="mini-btn" id="addPhotosBtn" type="button">إضافة صور</button>
+        </div>
+        <p class="stage-hint" style="text-align:start;margin:0">كل صورة أسفل الأخرى، ولكل واحدة ضبطها الخاص المستقل. اضغط على أي صورة لتصبح هي المعروضة في محرر الضبط بالأسفل، وحدّد عدد نسخها من حقل «عدد النسخ» — تعديلاتك محفوظة لكل صورة عند التنقل بينها.</p>
+        <div id="photoList"></div>
+      </section>
+
       <main class="grid">
         <!-- Editor column -->
         <section class="card">
           <div class="card-head">
-            <h2>١ — اضبط الصورة</h2>
-            <button class="mini-btn" id="changePhotoBtn" type="button">تغيير الصورة</button>
+            <h2>١ — اضبط الصورة <small id="activePhotoName"></small></h2>
+            <button class="mini-btn" id="changePhotoBtn" type="button">إضافة صور</button>
           </div>
 
           <div class="stage" id="stage">
@@ -391,32 +429,37 @@
             <button class="preset" type="button" data-sheet="s15x20">ورقة 15 × 20 سم<small>12 صورة — 4 × 3</small></button>
             <button class="preset" type="button" data-sheet="a4">ورقة A4<small>العدد تلقائي حسب المقاس</small></button>
           </div>
+          <h3>نمط الطباعة</h3>
+          <div class="seg" id="modeSeg">
+            <button class="preset active" type="button" data-mode="together">دفعة واحدة<small>نسخ كل الصور معاً في أوراق متتابعة</small></button>
+            <button class="preset" type="button" data-mode="separate">دفعات منفصلة<small>لكل صورة أوراقها الخاصة بها</small></button>
+          </div>
           <div class="switch-row">
             <span class="txt">خطوط القصّ<small>خطوط رمادية خفيفة حول كل صورة لتسهيل القصّ بالمقص</small></span>
             <button class="switch" id="cutSwitch" type="button" aria-pressed="true" aria-label="خطوط القص"></button>
           </div>
 
           <div class="sheet-preview">
-            <canvas id="sheetCanvas" width="1772" height="1181"></canvas>
+            <div id="sheetsPreview"></div>
             <p class="sheet-info" id="sheetInfo">—</p>
           </div>
 
           <div class="downloads">
             <button class="btn" id="dlPhotoBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5"/><path d="M4 19h16"/></svg>
-              تحميل الصورة الواحدة JPG
+              تحميل الصورة المختارة JPG
             </button>
             <button class="btn" id="dlSheetBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18" opacity=".45"/><path d="M12 8v6m0 0l-2-2m2 2l2-2"/></svg>
-              تحميل ورقة الطباعة JPG
+              تحميل أوراق الطباعة JPG
             </button>
             <button class="btn" id="dlPdfBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h8L19 7.5v14H6z"/><path d="M14 2.5v5H19"/><path d="M12 11v6m0 0l-2.2-2.2M12 17l2.2-2.2"/></svg>
-              تحميل ورقة الطباعة PDF
+              تحميل الأوراق PDF واحد
             </button>
             <button class="btn secondary" id="printBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V3h10v5"/><rect x="4" y="8" width="16" height="8" rx="1.5"/><path d="M7 13h10v8H7z"/></svg>
-              طباعة الورقة
+              طباعة الأوراق
             </button>
           </div>
           <p class="note" style="text-align:start">نصيحة للطباعة: اختر في الطابعة مقاس الورقة نفسه (10×15 أو 15×20 أو A4) وفعّل خيار «المقاس الحقيقي 100%» حتى تخرج الصور بمقاسها الصحيح بالضبط.</p>
@@ -425,39 +468,138 @@
       </div>
     </div>
 
-    <div id="printArea"><img id="printImg" alt="" /></div>
+    <div id="printArea"></div>
     <style id="pageStyle"></style>
     <div class="toast" id="toast" role="status"></div>
 
     <script>
       "use strict";
-      /* ================= Constants & state ================= */
+      /* ================= Constants & helpers ================= */
       var PX_PER_CM = 300 / 2.54; // 300 DPI
       function cmPx(cm) { return Math.round(cm * PX_PER_CM); }
       function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 
-      var state = {
-        srcOriginal: null,  // canvas, unrotated image
-        rot90: 0,           // manual 90-degree-step rotation
-        fineAngle: 0,       // smart-crop leveling angle (degrees)
-        rotBaseOrig: null,  // original after 90-degree steps, before fine angle (detection frame)
-        srcOrigRot: null,   // original fully rotated (editor source)
-        rotBaseCut: null, srcCutRot: null, // background-removed version, same transforms
-        cutout: null,       // RGBA canvas: person only, in the original frame
-        bgRemoved: false, previewOrig: false,
-        zoom: 1, ox: 0, oy: 0,
-        photoW: 3.5, photoH: 4.5,
-        bright: 100, contrast: 100, sat: 100, sharp: 0,
-        bg: "#ffffff",
-        unify: false, unifyTol: 85,
-        sheet: "s10x15",
-        cutlines: true,
-        guides: true
-      };
+      /* ================= Pure mask-orientation logic (DOM-free) =================
+         In an ID photo the person stands in the center and the four corners are
+         background. A correct mask has HIGH alpha in the center and LOW alpha in
+         the corners. If a model/path returns the mask inverted (corners higher
+         than center), we detect it here and flip the alpha — this guards every
+         current and future segmentation path against inversion. */
+      /* PURE-MASK-BEGIN */
+      function maskRegionMeans(alpha, w, h) {
+        function mean(x0, y0, x1, y1) {
+          var s = 0, n = 0;
+          for (var y = y0; y < y1; y++)
+            for (var x = x0; x < x1; x++) { s += alpha[y * w + x]; n++; }
+          return n ? s / n : 0;
+        }
+        var cw = Math.max(2, Math.round(w * 0.14)), ch = Math.max(2, Math.round(h * 0.14));
+        var corner = (mean(0, 0, cw, ch) + mean(w - cw, 0, w, ch) +
+                      mean(0, h - ch, cw, h) + mean(w - cw, h - ch, w, h)) / 4;
+        var center = mean(Math.round(w * 0.32), Math.round(h * 0.25),
+                          Math.round(w * 0.68), Math.round(h * 0.75));
+        return { corner: corner, center: center };
+      }
+      function maskNeedsInvert(alpha, w, h) {
+        var m = maskRegionMeans(alpha, w, h);
+        return m.corner > m.center + 12;
+      }
+      function invertAlpha(alpha) {
+        for (var i = 0; i < alpha.length; i++) alpha[i] = 255 - alpha[i];
+      }
+      /* PURE-MASK-END */
+
+      /* ================= Pure sheet planning (DOM-free) ================= */
+      /* PURE-PLAN-BEGIN */
+      function sheetSpecFor(sheetId) {
+        if (sheetId === "s10x15") return { id: "10x15", wmm: 150, hmm: 100, W: cmPx(15), H: cmPx(10), cols: 4, rows: 2 };
+        if (sheetId === "s15x20") return { id: "15x20", wmm: 200, hmm: 150, W: cmPx(20), H: cmPx(15), cols: 4, rows: 3 };
+        return { id: "a4", wmm: 210, hmm: 297, W: cmPx(21), H: cmPx(29.7), cols: 0, rows: 0 };
+      }
+      function computeLayout(spec, pw, ph) {
+        var positions = [];
+        if (spec.cols > 0 && pw * spec.cols <= spec.W && ph * spec.rows <= spec.H) {
+          var gx = (spec.W - pw * spec.cols) / (spec.cols + 1);
+          var gy = (spec.H - ph * spec.rows) / (spec.rows + 1);
+          for (var r = 0; r < spec.rows; r++)
+            for (var c = 0; c < spec.cols; c++)
+              positions.push([gx + c * (pw + gx), gy + r * (ph + gy)]);
+          return positions;
+        }
+        var m = cmPx(0.5), g = cmPx(0.2);
+        var cols = Math.max(1, Math.floor((spec.W - 2 * m + g) / (pw + g)));
+        var rows = Math.max(1, Math.floor((spec.H - 2 * m + g) / (ph + g)));
+        var gridW = cols * pw + (cols - 1) * g, gridH = rows * ph + (rows - 1) * g;
+        var sx = (spec.W - gridW) / 2, sy = (spec.H - gridH) / 2;
+        for (var r2 = 0; r2 < rows; r2++)
+          for (var c2 = 0; c2 < cols; c2++)
+            positions.push([sx + c2 * (pw + g), sy + r2 * (ph + g)]);
+        return positions;
+      }
+      /* items: [{pw, ph, copies}] in order. mode: "together" | "separate".
+         Returns plans: [{tiles: [{item: index, x, y, w, h}]}]. In together mode,
+         consecutive photos of the same size share a sheet in order; a size change
+         starts a fresh sheet. In separate mode every photo starts fresh sheets. */
+      function planSheetsPure(spec, items, mode) {
+        var plans = [];
+        function newPlan() { var p = { tiles: [] }; plans.push(p); return p; }
+        if (mode === "separate") {
+          items.forEach(function (it, idx) {
+            var pos = computeLayout(spec, it.pw, it.ph);
+            var n = it.copies, i = 0;
+            while (i < n) {
+              var plan = newPlan();
+              var take = Math.min(pos.length, n - i);
+              for (var k = 0; k < take; k++)
+                plan.tiles.push({ item: idx, x: pos[k][0], y: pos[k][1], w: it.pw, h: it.ph });
+              i += take;
+            }
+          });
+          return plans;
+        }
+        var cur = null, curKey = null, pos = null, at = 0;
+        items.forEach(function (it, idx) {
+          var key = it.pw + "x" + it.ph;
+          var placed = 0;
+          while (placed < it.copies) {
+            if (!cur || curKey !== key) {
+              cur = newPlan(); pos = computeLayout(spec, it.pw, it.ph); at = 0; curKey = key;
+            }
+            var take = Math.min(pos.length - at, it.copies - placed);
+            for (var k = 0; k < take; k++) {
+              cur.tiles.push({ item: idx, x: pos[at][0], y: pos[at][1], w: it.pw, h: it.ph });
+              at++;
+            }
+            placed += take;
+            if (at >= pos.length) cur = null;
+          }
+        });
+        return plans;
+      }
+      /* PURE-PLAN-END */
+
+      /* ================= State ================= */
+      function newPhotoState() {
+        return {
+          srcOriginal: null, rot90: 0, fineAngle: 0,
+          rotBaseOrig: null, srcOrigRot: null,
+          rotBaseCut: null, srcCutRot: null,
+          cutout: null, bgRemoved: false, previewOrig: false,
+          zoom: 1, ox: 0, oy: 0,
+          photoW: 3.5, photoH: 4.5,
+          bright: 100, contrast: 100, sat: 100, sharp: 0,
+          bg: "#ffffff", unify: false, unifyTol: 85
+        };
+      }
+      var photos = [];        // [{id, name, st, copies, copiesTouched, thumb}]
+      var photoSeq = 0;
+      var activeId = null;
+      var state = null;       // active photo's state object (editor works on this)
+      var settings = { sheet: "s10x15", cutlines: true, guides: true, mode: "together" };
+      var smartBusy = false;
 
       var editor = document.getElementById("editor");
       var ectx = editor.getContext("2d");
-      var sheetCanvas = document.getElementById("sheetCanvas");
       var toastTimer = null;
 
       function toast(msg) {
@@ -467,8 +609,18 @@
         clearTimeout(toastTimer);
         toastTimer = setTimeout(function () { t.classList.remove("show"); }, 3200);
       }
+      function activePhoto() {
+        for (var i = 0; i < photos.length; i++) if (photos[i].id === activeId) return photos[i];
+        return null;
+      }
+      function sheetSpec() { return sheetSpecFor(settings.sheet); }
+      function effCopies(ph) {
+        if (ph.copiesTouched) return clamp(Math.round(ph.copies) || 1, 1, 99);
+        var spec = sheetSpec();
+        return Math.max(1, computeLayout(spec, cmPx(ph.st.photoW), cmPx(ph.st.photoH)).length);
+      }
 
-      /* ================= Image loading ================= */
+      /* ================= Image loading (multi) ================= */
       var fileInput = document.getElementById("fileInput");
       var dropzone = document.getElementById("dropzone");
 
@@ -483,62 +635,264 @@
         dropzone.addEventListener(ev, function (e) { e.preventDefault(); dropzone.classList.remove("drag"); });
       });
       dropzone.addEventListener("drop", function (e) {
-        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-        if (f) loadFile(f);
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
       });
       document.addEventListener("dragover", function (e) { e.preventDefault(); });
       document.addEventListener("drop", function (e) { e.preventDefault(); });
       fileInput.addEventListener("change", function () {
-        if (fileInput.files && fileInput.files[0]) loadFile(fileInput.files[0]);
+        if (fileInput.files && fileInput.files.length) addFiles(fileInput.files);
         fileInput.value = "";
       });
       document.getElementById("changePhotoBtn").addEventListener("click", function () { fileInput.click(); });
+      document.getElementById("addPhotosBtn").addEventListener("click", function () { fileInput.click(); });
+      var batchCard = document.getElementById("batchCard");
+      ["dragenter", "dragover"].forEach(function (ev) {
+        batchCard.addEventListener(ev, function (e) { e.preventDefault(); batchCard.classList.add("drag"); });
+      });
+      ["dragleave", "drop"].forEach(function (ev) {
+        batchCard.addEventListener(ev, function (e) { e.preventDefault(); batchCard.classList.remove("drag"); });
+      });
+      batchCard.addEventListener("drop", function (e) {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+      });
 
-      function loadFile(file) {
-        if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
-          toast("اختر ملف صورة من نوع JPG أو PNG أو WebP");
-          return;
-        }
-        var done = function (source) {
-          var c = document.createElement("canvas");
-          c.width = source.width; c.height = source.height;
-          c.getContext("2d").drawImage(source, 0, 0);
-          state.srcOriginal = c;
-          state.rot90 = 0; state.fineAngle = 0;
-          state.cutout = null; state.bgRemoved = false; state.previewOrig = false;
-          buildSrc();
-          resetCrop();
-          document.getElementById("bgUndoBtn").hidden = true;
-          document.getElementById("bgToggleBtn").hidden = true;
-          document.getElementById("bgProgressWrap").hidden = true;
-          document.getElementById("smartStatus").textContent = "";
-          document.getElementById("emptyState").hidden = true;
-          document.getElementById("workspace").hidden = false;
-          layoutEditor();
-          updateSheet();
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        };
-        if (window.createImageBitmap) {
-          createImageBitmap(file, { imageOrientation: "from-image" })
-            .then(done)
-            .catch(function () {
-              createImageBitmap(file).then(done).catch(function () { loadViaImg(file, done); });
-            });
-        } else {
-          loadViaImg(file, done);
-        }
+      function loadImageFile(file) {
+        return new Promise(function (resolve, reject) {
+          function done(source) {
+            var c = document.createElement("canvas");
+            c.width = source.width; c.height = source.height;
+            c.getContext("2d").drawImage(source, 0, 0);
+            resolve(c);
+          }
+          if (window.createImageBitmap) {
+            createImageBitmap(file, { imageOrientation: "from-image" })
+              .then(done)
+              .catch(function () {
+                createImageBitmap(file).then(done).catch(function () { loadViaImg(file, done, reject); });
+              });
+          } else {
+            loadViaImg(file, done, reject);
+          }
+        });
       }
-      function loadViaImg(file, done) {
+      function loadViaImg(file, done, reject) {
         var url = URL.createObjectURL(file);
         var img = new Image();
         img.onload = function () { URL.revokeObjectURL(url); done(img); };
-        img.onerror = function () { URL.revokeObjectURL(url); toast("تعذّر فتح هذه الصورة، جرّب صورة أخرى"); };
+        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("img load failed")); };
         img.src = url;
       }
 
-      /* ================= Rotation & effective source ================= */
-      function rot90Canvas(src) {
-        var r = ((state.rot90 || 0) % 360 + 360) % 360;
+      async function addFiles(fileList) {
+        var files = Array.prototype.slice.call(fileList || []).filter(function (f) {
+          return /^image\/(jpeg|png|webp)$/.test(f.type);
+        });
+        if (!files.length) { toast("اختر ملفات صورة من نوع JPG أو PNG أو WebP"); return; }
+        var added = [];
+        for (var i = 0; i < files.length; i++) {
+          try {
+            var c = await loadImageFile(files[i]);
+            var st = newPhotoState();
+            st.srcOriginal = c;
+            var ph = {
+              id: ++photoSeq,
+              name: files[i].name || ("صورة " + (photos.length + 1)),
+              st: st, copies: 8, copiesTouched: false, thumb: null
+            };
+            buildSrcFor(st);
+            photos.push(ph);
+            added.push(ph);
+          } catch (e) { /* skip unreadable file */ }
+        }
+        if (!added.length) { toast("تعذّر فتح الصور المختارة، جرّب صوراً أخرى"); return; }
+        document.getElementById("emptyState").hidden = true;
+        document.getElementById("workspace").hidden = false;
+        renderPhotoList();
+        if (!activePhoto()) {
+          activatePhoto(added[0].id);
+        } else {
+          updateSheet();
+        }
+        if (added.length > 1) toast("أُضيفت " + added.length + " صور إلى الدفعة");
+        if (photos.length === added.length) window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      /* ================= Batch photo list UI ================= */
+      var photoListEl = document.getElementById("photoList");
+      function photoTags(ph) {
+        var tags = [];
+        tags.push(ph.st.photoW + " × " + ph.st.photoH + " سم");
+        if (ph.st.bgRemoved) tags.push("الخلفية مُزالة ✓");
+        else if (ph.st.cutout) tags.push("إزالة الخلفية جاهزة");
+        if (ph.st.unify) tags.push("خلفية موحّدة");
+        return tags.join(" · ");
+      }
+      function renderPhotoList() {
+        document.getElementById("photoCount").textContent = photos.length;
+        photoListEl.innerHTML = "";
+        photos.forEach(function (ph) {
+          var item = document.createElement("div");
+          item.className = "photo-item" + (ph.id === activeId ? " active" : "");
+          item.dataset.id = ph.id;
+
+          var thumb = document.createElement("canvas");
+          thumb.width = 124; thumb.height = 160;
+          if (ph.thumb) thumb.getContext("2d").drawImage(ph.thumb, 0, 0, thumb.width, thumb.height);
+          item.appendChild(thumb);
+
+          var meta = document.createElement("div");
+          meta.className = "photo-meta";
+          var name = document.createElement("div");
+          name.className = "photo-name";
+          name.textContent = ph.name;
+          meta.appendChild(name);
+          var tags = document.createElement("div");
+          tags.className = "photo-tags";
+          tags.textContent = photoTags(ph);
+          meta.appendChild(tags);
+          var cw = document.createElement("div");
+          cw.className = "copies-wrap";
+          var lab = document.createElement("label");
+          lab.textContent = "عدد النسخ ";
+          lab.htmlFor = "copies-" + ph.id;
+          var inp = document.createElement("input");
+          inp.type = "number"; inp.min = "1"; inp.max = "99"; inp.step = "1";
+          inp.className = "copies-input"; inp.id = "copies-" + ph.id;
+          inp.value = effCopies(ph);
+          inp.dataset.photoid = ph.id;
+          lab.appendChild(inp);
+          cw.appendChild(lab);
+          var hint = document.createElement("span");
+          hint.style.color = "var(--muted)"; hint.style.fontSize = ".82rem";
+          hint.textContent = ph.copiesTouched ? "" : "(يملأ الورقة)";
+          cw.appendChild(hint);
+          meta.appendChild(cw);
+          item.appendChild(meta);
+
+          var del = document.createElement("button");
+          del.type = "button";
+          del.className = "mini-btn danger del-photo";
+          del.textContent = "حذف";
+          del.dataset.photoid = ph.id;
+          item.appendChild(del);
+
+          photoListEl.appendChild(item);
+        });
+      }
+      photoListEl.addEventListener("click", function (e) {
+        var del = e.target.closest ? e.target.closest(".del-photo") : null;
+        if (del) {
+          e.stopPropagation();
+          deletePhoto(parseInt(del.dataset.photoid, 10));
+          return;
+        }
+        if (e.target.classList && e.target.classList.contains("copies-input")) return;
+        var item = e.target.closest ? e.target.closest(".photo-item") : null;
+        if (item) activatePhoto(parseInt(item.dataset.id, 10), true);
+      });
+      photoListEl.addEventListener("input", function (e) {
+        if (!e.target.classList || !e.target.classList.contains("copies-input")) return;
+        var id = parseInt(e.target.dataset.photoid, 10);
+        for (var i = 0; i < photos.length; i++) {
+          if (photos[i].id === id) {
+            photos[i].copiesTouched = true;
+            photos[i].copies = clamp(parseInt(e.target.value, 10) || 1, 1, 99);
+          }
+        }
+        scheduleSheet();
+      });
+      photoListEl.addEventListener("change", function (e) {
+        if (!e.target.classList || !e.target.classList.contains("copies-input")) return;
+        e.target.value = clamp(parseInt(e.target.value, 10) || 1, 1, 99);
+        renderPhotoList();
+        updateSheet();
+      });
+      function refreshCopiesInputs() {
+        var inputs = photoListEl.querySelectorAll(".copies-input");
+        inputs.forEach(function (inp) {
+          var id = parseInt(inp.dataset.photoid, 10);
+          for (var i = 0; i < photos.length; i++)
+            if (photos[i].id === id && document.activeElement !== inp) inp.value = effCopies(photos[i]);
+        });
+      }
+      function deletePhoto(id) {
+        if (smartBusy) { toast("انتظر حتى تنتهي المعالجة الحالية"); return; }
+        var idx = -1;
+        photos.forEach(function (p, i) { if (p.id === id) idx = i; });
+        if (idx < 0) return;
+        var wasActive = photos[idx].id === activeId;
+        photos.splice(idx, 1);
+        tileCache = {};
+        if (!photos.length) {
+          activeId = null; state = null;
+          renderPhotoList();
+          document.getElementById("workspace").hidden = true;
+          document.getElementById("emptyState").hidden = false;
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          return;
+        }
+        renderPhotoList();
+        if (wasActive) activatePhoto(photos[Math.min(idx, photos.length - 1)].id);
+        else updateSheet();
+        toast("حُذفت الصورة من الدفعة");
+      }
+
+      /* ================= Activation & control sync ================= */
+      function setSlider(id, outId, v) {
+        document.getElementById(id).value = v;
+        document.getElementById(outId).textContent = v + "%";
+      }
+      function syncControlsFromState() {
+        if (!state) return;
+        setSlider("zoomRange", "zoomOut", Math.round(state.zoom * 100));
+        setSlider("brightRange", "brightOut", state.bright);
+        setSlider("contrastRange", "contrastOut", state.contrast);
+        setSlider("satRange", "satOut", state.sat);
+        setSlider("sharpRange", "sharpOut", state.sharp);
+        document.getElementById("sizeW").value = state.photoW;
+        document.getElementById("sizeH").value = state.photoH;
+        var matched = false;
+        document.querySelectorAll("#sizePresets .preset").forEach(function (b) {
+          var on = !matched && parseFloat(b.dataset.w) === state.photoW && parseFloat(b.dataset.h) === state.photoH;
+          b.classList.toggle("active", on);
+          if (on) matched = true;
+        });
+        document.querySelectorAll("#swatches .swatch").forEach(function (b) {
+          b.classList.toggle("active", b.dataset.color === state.bg);
+        });
+        var us = document.getElementById("unifySwitch");
+        us.setAttribute("aria-pressed", String(state.unify));
+        document.getElementById("unifyControls").hidden = !state.unify;
+        document.getElementById("unifyRange").value = state.unifyTol;
+        document.getElementById("unifyOut").textContent = state.unifyTol;
+        var undo = document.getElementById("bgUndoBtn"), tog = document.getElementById("bgToggleBtn");
+        undo.hidden = !state.bgRemoved;
+        tog.hidden = !state.bgRemoved;
+        tog.textContent = "عرض الأصل للمقارنة";
+        document.getElementById("bgProgressWrap").hidden = true;
+        document.getElementById("smartStatus").textContent = "";
+        var ph = activePhoto();
+        document.getElementById("activePhotoName").textContent = ph ? "— " + ph.name : "";
+      }
+      function activatePhoto(id, scroll) {
+        if (smartBusy) { toast("انتظر حتى تنتهي المعالجة الحالية"); return; }
+        var ph = null;
+        photos.forEach(function (p) { if (p.id === id) ph = p; });
+        if (!ph) return;
+        activeId = id;
+        state = ph.st;
+        syncControlsFromState();
+        layoutEditor();
+        renderPhotoList();
+        updateSheet();
+        if (scroll) {
+          document.getElementById("smartCard").scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+
+      /* ================= Rotation & effective source (per photo) ================= */
+      function rot90CanvasFor(st, src) {
+        var r = ((st.rot90 || 0) % 360 + 360) % 360;
         var c = document.createElement("canvas");
         var ctx = c.getContext("2d");
         if (r === 90 || r === 270) { c.width = src.height; c.height = src.width; }
@@ -565,46 +919,50 @@
         ctx.drawImage(src, -src.width / 2, -src.height / 2);
         return c;
       }
-      function compositeCutout() {
+      function compositeCutoutFor(st) {
         var c = document.createElement("canvas");
-        c.width = state.cutout.width; c.height = state.cutout.height;
+        c.width = st.cutout.width; c.height = st.cutout.height;
         var ctx = c.getContext("2d");
-        ctx.fillStyle = state.bg;
+        ctx.fillStyle = st.bg;
         ctx.fillRect(0, 0, c.width, c.height);
-        ctx.drawImage(state.cutout, 0, 0);
+        ctx.drawImage(st.cutout, 0, 0);
         return c;
       }
-      function buildSrc() {
-        var o = state.srcOriginal;
+      function buildSrcFor(st) {
+        var o = st.srcOriginal;
         if (!o) return;
-        state.rotBaseOrig = rot90Canvas(o);
-        state.srcOrigRot = fineCanvas(state.rotBaseOrig, state.fineAngle || 0, "#ffffff");
-        if (state.cutout) {
-          state.rotBaseCut = rot90Canvas(compositeCutout());
-          state.srcCutRot = fineCanvas(state.rotBaseCut, state.fineAngle || 0, state.bg);
+        st.rotBaseOrig = rot90CanvasFor(st, o);
+        st.srcOrigRot = fineCanvas(st.rotBaseOrig, st.fineAngle || 0, "#ffffff");
+        if (st.cutout) {
+          st.rotBaseCut = rot90CanvasFor(st, compositeCutoutFor(st));
+          st.srcCutRot = fineCanvas(st.rotBaseCut, st.fineAngle || 0, st.bg);
         } else {
-          state.rotBaseCut = null; state.srcCutRot = null;
+          st.rotBaseCut = null; st.srcCutRot = null;
         }
       }
-      function renderSrc() {
-        return (state.bgRemoved && state.srcCutRot) ? state.srcCutRot : state.srcOrigRot;
+      function buildSrc() { if (state) buildSrcFor(state); }
+      function renderSrcFor(st) {
+        return (st.bgRemoved && st.srcCutRot) ? st.srcCutRot : st.srcOrigRot;
       }
+      function renderSrc() { return state ? renderSrcFor(state) : null; }
       function viewSrc() {
+        if (!state) return null;
         return state.previewOrig ? state.srcOrigRot : renderSrc();
       }
       document.getElementById("rotateCwBtn").addEventListener("click", function () {
-        if (!state.srcOriginal) return;
+        if (!state || !state.srcOriginal) return;
         state.rot90 = ((state.rot90 || 0) + 90) % 360; state.fineAngle = 0;
         buildSrc(); resetCrop(); layoutEditor(); updateSheet();
       });
       document.getElementById("rotateCcwBtn").addEventListener("click", function () {
-        if (!state.srcOriginal) return;
+        if (!state || !state.srcOriginal) return;
         state.rot90 = ((state.rot90 || 0) - 90 + 360) % 360; state.fineAngle = 0;
         buildSrc(); resetCrop(); layoutEditor(); updateSheet();
       });
 
       /* ================= Editor ================= */
       function resetCrop() {
+        if (!state) return;
         state.zoom = 1; state.ox = 0; state.oy = 0;
         var z = document.getElementById("zoomRange");
         z.value = 100;
@@ -614,13 +972,23 @@
         resetCrop(); layoutEditor(); updateSheet();
       });
 
-      function layoutEditor() {
-        var ratio = state.photoH / state.photoW;
+      function stageSizeFor(st) {
+        var ratio = st.photoH / st.photoW;
         var w = 720, h = Math.round(720 * ratio);
         if (h > 940) { h = 940; w = Math.round(940 / ratio); }
-        editor.width = w; editor.height = h;
+        return { w: w, h: h };
+      }
+      function layoutEditor() {
+        if (!state) return;
+        var sz = stageSizeFor(state);
+        editor.width = sz.w; editor.height = sz.h;
         clampOffset();
         drawEditor();
+      }
+      function coverScaleFor(st, W, H) {
+        var s = renderSrcFor(st);
+        if (!s) return 1;
+        return Math.max(W / s.width, H / s.height);
       }
       function coverScale() {
         var s = renderSrc();
@@ -664,12 +1032,12 @@
       /* Drag to pan */
       var dragging = false, lastX = 0, lastY = 0;
       editor.addEventListener("pointerdown", function (e) {
-        if (!state.srcOriginal) return;
+        if (!state || !state.srcOriginal) return;
         dragging = true; lastX = e.clientX; lastY = e.clientY;
         editor.setPointerCapture(e.pointerId);
       });
       editor.addEventListener("pointermove", function (e) {
-        if (!dragging || !state.srcOriginal) return;
+        if (!dragging || !state || !state.srcOriginal) return;
         var rect = editor.getBoundingClientRect();
         var kx = editor.width / rect.width, ky = editor.height / rect.height;
         state.ox += (e.clientX - lastX) * kx;
@@ -681,13 +1049,14 @@
         editor.addEventListener(ev, function () { if (dragging) { dragging = false; scheduleSheet(); } });
       });
       editor.addEventListener("wheel", function (e) {
-        if (!state.srcOriginal) return;
+        if (!state || !state.srcOriginal) return;
         e.preventDefault();
         var z = clamp(state.zoom * (e.deltaY < 0 ? 1.07 : 0.93), 1, 3.5);
         setZoom(z);
       }, { passive: false });
 
       function setZoom(z) {
+        if (!state) return;
         state.zoom = z;
         var pct = Math.round(z * 100);
         document.getElementById("zoomRange").value = pct;
@@ -701,21 +1070,23 @@
       /* Guides switch */
       var guidesSwitch = document.getElementById("guidesSwitch");
       guidesSwitch.addEventListener("click", function () {
-        state.guides = !state.guides;
-        this.setAttribute("aria-pressed", String(state.guides));
-        document.getElementById("guidesSvg").style.display = state.guides ? "" : "none";
+        settings.guides = !settings.guides;
+        this.setAttribute("aria-pressed", String(settings.guides));
+        document.getElementById("guidesSvg").style.display = settings.guides ? "" : "none";
       });
 
       /* ================= Size ================= */
       var sizeW = document.getElementById("sizeW"), sizeH = document.getElementById("sizeH");
       function applySize(w, h, markPreset) {
+        if (!state) return;
         state.photoW = clamp(w || 3.5, 1, 20);
         state.photoH = clamp(h || 4.5, 1, 20);
         sizeW.value = state.photoW; sizeH.value = state.photoH;
         if (!markPreset) {
           document.querySelectorAll("#sizePresets .preset").forEach(function (b) { b.classList.remove("active"); });
         }
-        if (state.srcOriginal) { layoutEditor(); updateSheet(); }
+        tileCache = {};
+        layoutEditor(); renderPhotoList(); updateSheet();
       }
       document.querySelectorAll("#sizePresets .preset").forEach(function (btn) {
         btn.addEventListener("click", function () {
@@ -734,6 +1105,7 @@
       function bindAdj(id, outId, key) {
         var el = document.getElementById(id), out = document.getElementById(outId);
         el.addEventListener("input", function () {
+          if (!state) return;
           state[key] = parseInt(this.value, 10);
           out.textContent = this.value + "%";
           drawEditor(); scheduleSheet();
@@ -744,6 +1116,7 @@
       bindAdj("satRange", "satOut", "sat");
       bindAdj("sharpRange", "sharpOut", "sharp");
       document.getElementById("resetAdjBtn").addEventListener("click", function () {
+        if (!state) return;
         [["brightRange", "brightOut", "bright", 100],
          ["contrastRange", "contrastOut", "contrast", 100],
          ["satRange", "satOut", "sat", 100],
@@ -758,6 +1131,7 @@
       /* ================= Background ================= */
       document.querySelectorAll("#swatches .swatch").forEach(function (btn) {
         btn.addEventListener("click", function () {
+          if (!state) return;
           document.querySelectorAll("#swatches .swatch").forEach(function (b) { b.classList.remove("active"); });
           this.classList.add("active");
           state.bg = this.dataset.color;
@@ -767,12 +1141,14 @@
       });
       var unifySwitch = document.getElementById("unifySwitch");
       unifySwitch.addEventListener("click", function () {
+        if (!state) return;
         state.unify = !state.unify;
         this.setAttribute("aria-pressed", String(state.unify));
         document.getElementById("unifyControls").hidden = !state.unify;
         updateSheet();
       });
       document.getElementById("unifyRange").addEventListener("input", function () {
+        if (!state) return;
         state.unifyTol = parseInt(this.value, 10);
         document.getElementById("unifyOut").textContent = this.value;
         scheduleSheet();
@@ -782,29 +1158,34 @@
         return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
       }
 
-      /* ================= Photo rendering (300 DPI) ================= */
-      function renderPhoto() {
-        var pw = cmPx(state.photoW), ph = cmPx(state.photoH);
+      /* ================= Photo rendering (300 DPI, per photo) ================= */
+      function renderPhotoFor(st) {
+        var pw = cmPx(st.photoW), ph = cmPx(st.photoH);
         var c = document.createElement("canvas");
         c.width = pw; c.height = ph;
         var ctx = c.getContext("2d");
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, pw, ph);
-        var rsrc = renderSrc();
+        var rsrc = renderSrcFor(st);
         if (rsrc) {
-          var p = drawParams(rsrc);
-          var k = pw / editor.width;
-          ctx.drawImage(rsrc, p.dx * k, p.dy * k, p.dw * k, p.dh * k);
+          var stage = stageSizeFor(st);
+          var cs = coverScaleFor(st, stage.w, stage.h) * st.zoom;
+          var dw = rsrc.width * cs, dh = rsrc.height * cs;
+          var dx = stage.w / 2 - dw / 2 + st.ox;
+          var dy = stage.h / 2 - dh / 2 + st.oy;
+          var k = pw / stage.w;
+          ctx.drawImage(rsrc, dx * k, dy * k, dw * k, dh * k);
         }
-        applyAdjustments(ctx, pw, ph);
-        if (state.sharp > 0) applySharpen(ctx, pw, ph, state.sharp / 100 * 0.9);
-        if (state.unify) applyUnify(ctx, pw, ph);
+        applyAdjustments(st, ctx, pw, ph);
+        if (st.sharp > 0) applySharpen(ctx, pw, ph, st.sharp / 100 * 0.9);
+        if (st.unify) applyUnify(st, ctx, pw, ph);
         return c;
       }
-      function applyAdjustments(ctx, w, h) {
-        if (state.bright === 100 && state.contrast === 100 && state.sat === 100) return;
+      function renderPhoto() { return renderPhotoFor(state); }
+      function applyAdjustments(st, ctx, w, h) {
+        if (st.bright === 100 && st.contrast === 100 && st.sat === 100) return;
         var img = ctx.getImageData(0, 0, w, h), d = img.data;
-        var b = state.bright / 100, cf = state.contrast / 100, sf = state.sat / 100;
+        var b = st.bright / 100, cf = st.contrast / 100, sf = st.sat / 100;
         for (var i = 0; i < d.length; i += 4) {
           var r = d[i] * b, g = d[i + 1] * b, bl = d[i + 2] * b;
           r = (r - 128) * cf + 128; g = (g - 128) * cf + 128; bl = (bl - 128) * cf + 128;
@@ -831,7 +1212,7 @@
         }
         ctx.putImageData(out, 0, 0);
       }
-      function applyUnify(ctx, w, h) {
+      function applyUnify(st, ctx, w, h) {
         var img = ctx.getImageData(0, 0, w, h), d = img.data;
         var p = Math.max(4, Math.round(Math.min(w, h) * 0.05));
         var corners = [[0, 0], [w - p, 0], [0, h - p], [w - p, h - p]];
@@ -845,8 +1226,8 @@
           }
         });
         tr /= n; tg /= n; tb /= n;
-        var bg = hexRgb(state.bg);
-        var tol = state.unifyTol, feather = tol * 0.7, full = tol + feather;
+        var bg = hexRgb(st.bg);
+        var tol = st.unifyTol, feather = tol * 0.7, full = tol + feather;
         for (var j = 0; j < d.length; j += 4) {
           var dr = d[j] - tr, dg = d[j + 1] - tg, db = d[j + 2] - tb;
           var dist = Math.sqrt(dr * dr + dg * dg + db * db);
@@ -862,79 +1243,115 @@
         ctx.putImageData(img, 0, 0);
       }
 
-      /* ================= Sheets ================= */
-      function sheetSpec() {
-        if (state.sheet === "s10x15") return { id: "10x15", wmm: 150, hmm: 100, W: cmPx(15), H: cmPx(10), cols: 4, rows: 2 };
-        if (state.sheet === "s15x20") return { id: "15x20", wmm: 200, hmm: 150, W: cmPx(20), H: cmPx(15), cols: 4, rows: 3 };
-        return { id: "a4", wmm: 210, hmm: 297, W: cmPx(21), H: cmPx(29.7), cols: 0, rows: 0 };
+      /* ================= Sheets: plan, render, preview ================= */
+      var tileCache = {};
+      function tileFor(ph) {
+        if (!tileCache[ph.id]) tileCache[ph.id] = renderPhotoFor(ph.st);
+        return tileCache[ph.id];
       }
-      function computeLayout(spec, pw, ph) {
-        var positions = [];
-        if (spec.cols > 0 && pw * spec.cols <= spec.W && ph * spec.rows <= spec.H) {
-          var gx = (spec.W - pw * spec.cols) / (spec.cols + 1);
-          var gy = (spec.H - ph * spec.rows) / (spec.rows + 1);
-          for (var r = 0; r < spec.rows; r++)
-            for (var c = 0; c < spec.cols; c++)
-              positions.push([gx + c * (pw + gx), gy + r * (ph + gy)]);
-          return positions;
-        }
-        var m = cmPx(0.5), g = cmPx(0.2);
-        var cols = Math.max(1, Math.floor((spec.W - 2 * m + g) / (pw + g)));
-        var rows = Math.max(1, Math.floor((spec.H - 2 * m + g) / (ph + g)));
-        var gridW = cols * pw + (cols - 1) * g, gridH = rows * ph + (rows - 1) * g;
-        var sx = (spec.W - gridW) / 2, sy = (spec.H - gridH) / 2;
-        for (var r2 = 0; r2 < rows; r2++)
-          for (var c2 = 0; c2 < cols; c2++)
-            positions.push([sx + c2 * (pw + g), sy + r2 * (ph + g)]);
-        return positions;
-      }
-      function buildSheet(target) {
-        var photo = renderPhoto();
+      function planSheets() {
         var spec = sheetSpec();
-        target.width = spec.W; target.height = spec.H;
-        var ctx = target.getContext("2d");
-        ctx.fillStyle = state.bg;
-        ctx.fillRect(0, 0, spec.W, spec.H);
-        var positions = computeLayout(spec, photo.width, photo.height);
-        positions.forEach(function (pos) {
-          ctx.drawImage(photo, pos[0], pos[1]);
+        var items = photos.map(function (ph) {
+          return { pw: cmPx(ph.st.photoW), ph: cmPx(ph.st.photoH), copies: effCopies(ph) };
         });
-        if (state.cutlines) {
+        var plans = planSheetsPure(spec, items, settings.mode);
+        return { spec: spec, plans: plans };
+      }
+      function renderSheetCanvas(plan, spec) {
+        var c = document.createElement("canvas");
+        c.width = spec.W; c.height = spec.H;
+        var ctx = c.getContext("2d");
+        var first = plan.tiles[0];
+        ctx.fillStyle = first ? photos[first.item].st.bg : "#ffffff";
+        ctx.fillRect(0, 0, spec.W, spec.H);
+        plan.tiles.forEach(function (t) {
+          ctx.drawImage(tileFor(photos[t.item]), t.x, t.y);
+        });
+        if (settings.cutlines) {
           ctx.save();
           ctx.strokeStyle = "rgba(90,90,90,0.55)";
           ctx.lineWidth = 2;
           ctx.setLineDash([10, 7]);
-          positions.forEach(function (pos) {
-            ctx.strokeRect(pos[0] + 1, pos[1] + 1, photo.width - 2, photo.height - 2);
+          plan.tiles.forEach(function (t) {
+            ctx.strokeRect(t.x + 1, t.y + 1, t.w - 2, t.h - 2);
           });
           ctx.restore();
         }
-        return { spec: spec, count: positions.length, pw: photo.width, ph: photo.height };
+        return c;
       }
       var sheetTimer = null;
       function scheduleSheet() {
         clearTimeout(sheetTimer);
         sheetTimer = setTimeout(updateSheet, 140);
       }
+      function updateActiveThumb() {
+        var ph = activePhoto();
+        if (!ph) return;
+        var full = tileFor(ph);
+        var t = document.createElement("canvas");
+        t.width = 124; t.height = 160;
+        var ctx = t.getContext("2d");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, t.width, t.height);
+        var s = Math.max(t.width / full.width, t.height / full.height);
+        var dw = full.width * s, dh = full.height * s;
+        ctx.drawImage(full, (t.width - dw) / 2, (t.height - dh) / 2, dw, dh);
+        ph.thumb = t;
+        var items = photoListEl.querySelectorAll(".photo-item");
+        items.forEach(function (item) {
+          if (parseInt(item.dataset.id, 10) === ph.id) {
+            var cv = item.querySelector("canvas");
+            if (cv) { cv.getContext("2d").drawImage(t, 0, 0); }
+            var tags = item.querySelector(".photo-tags");
+            if (tags) tags.textContent = photoTags(ph);
+          }
+        });
+      }
       function updateSheet() {
-        if (!state.srcOriginal) return;
-        var info = buildSheet(sheetCanvas);
+        if (!photos.length) return;
+        tileCache = {};
+        var res = planSheets();
+        var spec = res.spec, plans = res.plans;
+        var wrap = document.getElementById("sheetsPreview");
+        wrap.innerHTML = "";
+        var MAXP = 8;
+        plans.slice(0, MAXP).forEach(function (plan) {
+          wrap.appendChild(renderSheetCanvas(plan, spec));
+        });
+        if (plans.length > MAXP) {
+          var more = document.createElement("p");
+          more.className = "more-sheets";
+          more.textContent = "+ " + (plans.length - MAXP) + " أوراق أخرى (تظهر كلها عند التحميل أو الطباعة)";
+          wrap.appendChild(more);
+        }
+        var total = 0;
+        plans.forEach(function (p) { total += p.tiles.length; });
         document.getElementById("sheetInfo").textContent =
-          info.count + " نسخ في الورقة · حجم الورقة " + info.spec.W + " × " + info.spec.H +
-          " بكسل · الصورة الواحدة " + info.pw + " × " + info.ph + " بكسل · الدقة 300 DPI";
+          plans.length + (plans.length === 1 ? " ورقة" : " أوراق") + " ستُنتج · " +
+          total + " نسخة إجمالاً · حجم الورقة " + spec.W + " × " + spec.H +
+          " بكسل · الدقة 300 DPI";
+        updateActiveThumb();
+        refreshCopiesInputs();
       }
       document.querySelectorAll("#sheetSeg .preset").forEach(function (btn) {
         btn.addEventListener("click", function () {
           document.querySelectorAll("#sheetSeg .preset").forEach(function (b) { b.classList.remove("active"); });
           this.classList.add("active");
-          state.sheet = this.dataset.sheet;
+          settings.sheet = this.dataset.sheet;
+          updateSheet();
+        });
+      });
+      document.querySelectorAll("#modeSeg .preset").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          document.querySelectorAll("#modeSeg .preset").forEach(function (b) { b.classList.remove("active"); });
+          this.classList.add("active");
+          settings.mode = this.dataset.mode;
           updateSheet();
         });
       });
       var cutSwitch = document.getElementById("cutSwitch");
       cutSwitch.addEventListener("click", function () {
-        state.cutlines = !state.cutlines;
-        this.setAttribute("aria-pressed", String(state.cutlines));
+        settings.cutlines = !settings.cutlines;
+        this.setAttribute("aria-pressed", String(settings.cutlines));
         updateSheet();
       });
 
@@ -965,11 +1382,11 @@
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
       }
       function busy(btn, fn) {
-        if (!state.srcOriginal) { toast("ارفع صورة أولاً"); return; }
-        var old = btn.textContent;
+        if (!photos.length || !state) { toast("ارفع صورة أولاً"); return; }
+        var old = btn.innerHTML;
         btn.disabled = true;
-        fn().then(function () { btn.disabled = false; btn.textContent = old; })
-             .catch(function () { btn.disabled = false; btn.textContent = old; toast("حدث خطأ، حاول مرة أخرى"); });
+        fn().then(function () { btn.disabled = false; btn.innerHTML = old; })
+             .catch(function () { btn.disabled = false; btn.innerHTML = old; toast("حدث خطأ، حاول مرة أخرى"); });
       }
 
       document.getElementById("dlPhotoBtn").addEventListener("click", function () {
@@ -983,44 +1400,65 @@
       });
       document.getElementById("dlSheetBtn").addEventListener("click", function () {
         var btn = this;
-        busy(btn, function () {
-          var tmp = document.createElement("canvas");
-          var info = buildSheet(tmp);
-          return canvasJpegBytes(tmp, 0.92).then(function (bytes) {
-            saveBlob(new Blob([bytes], { type: "image/jpeg" }), "sheet-" + info.spec.id + ".jpg");
-          });
+        busy(btn, async function () {
+          tileCache = {};
+          var res = planSheets();
+          for (var i = 0; i < res.plans.length; i++) {
+            var cnv = renderSheetCanvas(res.plans[i], res.spec);
+            var bytes = await canvasJpegBytes(cnv, 0.92);
+            var name = res.plans.length === 1
+              ? "sheet-" + res.spec.id + ".jpg"
+              : "sheet-" + res.spec.id + "-" + (i + 1) + ".jpg";
+            saveBlob(new Blob([bytes], { type: "image/jpeg" }), name);
+          }
+          toast("حُمّلت " + res.plans.length + (res.plans.length === 1 ? " ورقة" : " أوراق"));
         });
       });
       document.getElementById("dlPdfBtn").addEventListener("click", function () {
         var btn = this;
-        busy(btn, function () {
-          var tmp = document.createElement("canvas");
-          var info = buildSheet(tmp);
-          return canvasJpegBytes(tmp, 0.92).then(function (jpg) {
-            saveBlob(buildPdf(jpg, tmp.width, tmp.height, info.spec), "sheet-" + info.spec.id + ".pdf");
-          });
+        busy(btn, async function () {
+          tileCache = {};
+          var res = planSheets();
+          var pages = [];
+          for (var i = 0; i < res.plans.length; i++) {
+            var cnv = renderSheetCanvas(res.plans[i], res.spec);
+            var jpg = await canvasJpegBytes(cnv, 0.92);
+            pages.push({ jpg: jpg, w: cnv.width, h: cnv.height, spec: res.spec });
+          }
+          saveBlob(buildPdf(pages), "sheets-" + res.spec.id + ".pdf");
         });
       });
 
-      function buildPdf(jpg, imgW, imgH, spec) {
-        var wpt = (spec.wmm * 72 / 25.4).toFixed(2);
-        var hpt = (spec.hmm * 72 / 25.4).toFixed(2);
+      /* Multi-page PDF: one page per sheet, page size = exact sheet size. */
+      function buildPdf(pages) {
         var enc = new TextEncoder();
         var chunks = [], offsets = [0], len = 0;
         function ps(s) { var b = enc.encode(s); chunks.push(b); len += b.length; }
         function pb(b) { chunks.push(b); len += b.length; }
+        var n = pages.length;
+        var kids = [];
+        for (var i = 0; i < n; i++) kids.push((3 + i * 3) + " 0 R");
         ps("%PDF-1.4\n");
         offsets[1] = len; ps("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-        offsets[2] = len; ps("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-        offsets[3] = len; ps("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + wpt + " " + hpt + "] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
-        offsets[4] = len; ps("4 0 obj\n<< /Type /XObject /Subtype /Image /Width " + imgW + " /Height " + imgH + " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpg.length + " >>\nstream\n");
-        pb(jpg); ps("\nendstream\nendobj\n");
-        var content = "q\n" + wpt + " 0 0 " + hpt + " 0 0 cm\n/Im0 Do\nQ\n";
-        offsets[5] = len; ps("5 0 obj\n<< /Length " + content.length + " >>\nstream\n" + content + "endstream\nendobj\n");
+        offsets[2] = len; ps("2 0 obj\n<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + n + " >>\nendobj\n");
+        pages.forEach(function (pg, i) {
+          var pageObj = 3 + i * 3, imgObj = 4 + i * 3, contObj = 5 + i * 3;
+          var wpt = (pg.spec.wmm * 72 / 25.4).toFixed(2);
+          var hpt = (pg.spec.hmm * 72 / 25.4).toFixed(2);
+          offsets[pageObj] = len;
+          ps(pageObj + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + wpt + " " + hpt + "] /Resources << /XObject << /Im" + i + " " + imgObj + " 0 R >> >> /Contents " + contObj + " 0 R >>\nendobj\n");
+          offsets[imgObj] = len;
+          ps(imgObj + " 0 obj\n<< /Type /XObject /Subtype /Image /Width " + pg.w + " /Height " + pg.h + " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + pg.jpg.length + " >>\nstream\n");
+          pb(pg.jpg); ps("\nendstream\nendobj\n");
+          var content = "q\n" + wpt + " 0 0 " + hpt + " 0 0 cm\n/Im" + i + " Do\nQ\n";
+          offsets[contObj] = len;
+          ps(contObj + " 0 obj\n<< /Length " + content.length + " >>\nstream\n" + content + "endstream\nendobj\n");
+        });
+        var total = 2 + n * 3;
         var xref = len;
-        ps("xref\n0 6\n0000000000 65535 f \n");
-        for (var i = 1; i <= 5; i++) ps(String(offsets[i]).padStart(10, "0") + " 00000 n \n");
-        ps("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF");
+        ps("xref\n0 " + (total + 1) + "\n0000000000 65535 f \n");
+        for (var j = 1; j <= total; j++) ps(String(offsets[j]).padStart(10, "0") + " 00000 n \n");
+        ps("trailer\n<< /Size " + (total + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF");
         return new Blob(chunks, { type: "application/pdf" });
       }
 
@@ -1184,9 +1622,11 @@
         return Math.abs(fine) >= 0.3 ? Math.abs(fine).toFixed(1) : null;
       }
       document.getElementById("smartCropBtn").addEventListener("click", function () {
-        if (!state.srcOriginal) { toast("ارفع صورة أولاً"); return; }
+        if (!state || !state.srcOriginal) { toast("ارفع صورة أولاً"); return; }
+        if (smartBusy) return;
         var btn = this;
         btn.disabled = true;
+        smartBusy = true;
         setSmartStatus("جارٍ تحميل نموذج كشف الوجه وتحليل الصورة… (أول مرة فقط يحتاج إنترنت، وبعده يعمل من ذاكرة المتصفح)");
         (async function () {
           try {
@@ -1210,7 +1650,7 @@
           } catch (e) {
             setSmartStatus("");
             toast("تعذّر تشغيل القصّ الذكي — تأكد من الإنترنت أول مرة لتحميل النموذج، أو اضبط القصّ يدوياً");
-          } finally { btn.disabled = false; }
+          } finally { btn.disabled = false; smartBusy = false; }
         })();
       });
 
@@ -1286,15 +1726,41 @@
         for (var i = 0; i < arr.length; i++) {
           var o = i * 4;
           img.data[o] = 255; img.data[o + 1] = 255; img.data[o + 2] = 255;
-          img.data[o + 3] = arr[i] > 0 ? 255 : 0; // category 0 = background
+          /* Category values are NOT trusted for direction: depending on the
+             model/delegate the person may be category 0 or 1. We write one
+             interpretation here, and buildCutout's corner-vs-center check
+             auto-corrects the alpha if it turns out inverted. */
+          img.data[o + 3] = arr[i] > 0 ? 255 : 0;
         }
         ctx.putImageData(img, 0, 0);
         if (mask.close) mask.close();
         return c;
       }
+      /* Anti-inversion guard: extract the mask's alpha; in an ID photo the
+         corners are background (alpha ~0) and the center is the person
+         (alpha ~255). If the corners average HIGHER than the center, the mask
+         is inverted — flip the alpha before it is used. Runs for every mask,
+         whichever model produced it. */
+      function fixMaskOrientation(maskCanvas) {
+        var w = maskCanvas.width, h = maskCanvas.height;
+        if (!w || !h) return maskCanvas;
+        var ctx = maskCanvas.getContext("2d");
+        var img;
+        try { img = ctx.getImageData(0, 0, w, h); } catch (e) { return maskCanvas; }
+        var d = img.data;
+        var alpha = new Uint8ClampedArray(w * h);
+        for (var i = 0; i < w * h; i++) alpha[i] = d[i * 4 + 3];
+        if (maskNeedsInvert(alpha, w, h)) {
+          invertAlpha(alpha);
+          for (var j = 0; j < w * h; j++) d[j * 4 + 3] = alpha[j];
+          ctx.putImageData(img, 0, 0);
+        }
+        return maskCanvas;
+      }
       /* Upscale the work-size mask to full resolution, feather its edges (~1px),
          and cut the person out of the full-resolution original. */
       function buildCutout(maskCanvas, srcCanvas) {
+        fixMaskOrientation(maskCanvas);
         var W = srcCanvas.width, H = srcCanvas.height;
         var maskFull = document.createElement("canvas");
         maskFull.width = W; maskFull.height = H;
@@ -1321,7 +1787,8 @@
         bgToggleBtn.textContent = "عرض الأصل للمقارنة";
       }
       document.getElementById("bgRemoveBtn").addEventListener("click", function () {
-        if (!state.srcOriginal) { toast("ارفع صورة أولاً"); return; }
+        if (!state || !state.srcOriginal) { toast("ارفع صورة أولاً"); return; }
+        if (smartBusy) return;
         var btn = this;
         if (state.cutout && !state.bgRemoved) {
           // Re-apply the already computed cutout instantly, no AI run needed.
@@ -1332,6 +1799,7 @@
           return;
         }
         btn.disabled = true;
+        smartBusy = true;
         setBgProgress(2, "أول مرة فقط: سيُحمَّل نموذج الذكاء الاصطناعي من الإنترنت، وبعده يعمل بلا إنترنت من ذاكرة المتصفح.");
         (async function () {
           try {
@@ -1357,10 +1825,11 @@
           } catch (e) {
             bgProgWrap.hidden = true;
             toast("تعذّرت إزالة الخلفية بالذكاء الاصطناعي — تحقق من اتصال الإنترنت أول مرة لتحميل النموذج، أو استعمل خيار «خلفية موحّدة» التجريبي في الأسفل");
-          } finally { btn.disabled = false; }
+          } finally { btn.disabled = false; smartBusy = false; }
         })();
       });
       bgUndoBtn.addEventListener("click", function () {
+        if (!state) return;
         state.bgRemoved = false;
         state.previewOrig = false;
         buildSrc(); drawEditor(); updateSheet();
@@ -1370,6 +1839,7 @@
         toast("أُعيدت الصورة الأصلية — نتيجة الإزالة محفوظة ويمكن إعادة تطبيقها بزر الإزالة");
       });
       bgToggleBtn.addEventListener("click", function () {
+        if (!state) return;
         state.previewOrig = !state.previewOrig;
         this.textContent = state.previewOrig ? "عرض النتيجة" : "عرض الأصل للمقارنة";
         drawEditor();
@@ -1377,15 +1847,22 @@
 
       /* ================= Print ================= */
       document.getElementById("printBtn").addEventListener("click", function () {
-        if (!state.srcOriginal) { toast("ارفع صورة أولاً"); return; }
-        var tmp = document.createElement("canvas");
-        var info = buildSheet(tmp);
-        var img = document.getElementById("printImg");
-        img.src = tmp.toDataURL("image/jpeg", 0.92);
-        img.style.width = info.spec.wmm + "mm";
-        img.style.height = info.spec.hmm + "mm";
+        if (!photos.length || !state) { toast("ارفع صورة أولاً"); return; }
+        tileCache = {};
+        var res = planSheets();
+        var area = document.getElementById("printArea");
+        area.innerHTML = "";
+        res.plans.forEach(function (plan) {
+          var cnv = renderSheetCanvas(plan, res.spec);
+          var img = document.createElement("img");
+          img.alt = "";
+          img.src = cnv.toDataURL("image/jpeg", 0.92);
+          img.style.width = res.spec.wmm + "mm";
+          img.style.height = res.spec.hmm + "mm";
+          area.appendChild(img);
+        });
         document.getElementById("pageStyle").textContent =
-          "@page { size: " + info.spec.wmm + "mm " + info.spec.hmm + "mm; margin: 0; }";
+          "@page { size: " + res.spec.wmm + "mm " + res.spec.hmm + "mm; margin: 0; }";
         setTimeout(function () { window.print(); }, 60);
       });
     </script>
