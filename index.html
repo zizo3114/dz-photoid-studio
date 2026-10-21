@@ -133,12 +133,6 @@
       .photo-meta { flex: 1; min-width: 0; }
       .photo-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .photo-tags { color: var(--muted); font-size: .85rem; }
-      .copies-wrap { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-weight: 500; font-size: .95rem; }
-      .copies-input {
-        width: 78px; min-height: 40px; padding: 6px 8px; border-radius: 8px;
-        border: 1px solid var(--line); background: var(--card); color: var(--ink);
-        font-size: 1rem; font-family: inherit; text-align: center;
-      }
 
       /* ---------- Editor stage ---------- */
       .stage {
@@ -210,6 +204,47 @@
       @media (prefers-color-scheme: dark) {
         .warn { background: #38300f; border-color: #6b5c1e; color: #f0d48a; }
       }
+
+      /* ---------- Two-column workspace (controls / live result) ---------- */
+      .workspace-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 16px; align-items: start; }
+      @media (max-width: 960px) { .workspace-grid { grid-template-columns: 1fr; } }
+      @media (min-width: 961px) { .col-result { position: sticky; top: 12px; } }
+      .result-stage { text-align: center; }
+      .result-stage canvas {
+        max-width: min(100%, 360px); height: auto; background: #fff;
+        border: 1px solid var(--line); box-shadow: 0 4px 18px rgba(0,0,0,.18);
+      }
+
+      /* ---------- Print packages ---------- */
+      .pkg-wrap { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 8px; }
+      .pkg-wrap label { display: flex; align-items: center; gap: 6px; font-size: .92rem; font-weight: 500; }
+      .pkg-select {
+        min-height: 42px; padding: 6px 8px; border-radius: 8px; max-width: 100%;
+        border: 1px solid var(--line); background: var(--card); color: var(--ink);
+        font-family: inherit; font-size: .95rem; font-weight: 700;
+      }
+      .sheets-input {
+        width: 66px; min-height: 42px; padding: 6px 8px; border-radius: 8px;
+        border: 1px solid var(--line); background: var(--card); color: var(--ink);
+        font-size: 1rem; font-family: inherit; text-align: center;
+      }
+      .pkg-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+      .pkg-form .full { grid-column: 1 / -1; }
+      .pkg-form label { display: block; font-size: .92rem; font-weight: 500; margin-bottom: 4px; }
+      .pkg-form input {
+        width: 100%; min-height: 46px; padding: 8px 10px; border-radius: 8px;
+        border: 1px solid var(--line); background: var(--field); color: var(--ink);
+        font-size: 1.02rem; font-family: inherit; text-align: center;
+      }
+      .pkg-form input[type="text"] { text-align: start; }
+      .custom-pkg-item {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+        margin-top: 8px; background: var(--field); font-weight: 500; font-size: .95rem;
+      }
+      .sheet-label { font-weight: 700; margin: 12px 0 6px; text-align: start; }
+      .sheet-label:first-child { margin-top: 0; }
+      .sheet-label small { color: var(--muted); font-weight: 500; }
 
       /* ---------- Sheet ---------- */
       .seg { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -291,6 +326,8 @@
 
       <!-- ===== Workspace ===== -->
       <div id="workspace" hidden>
+      <div class="workspace-grid">
+      <div class="col-main">
       <section class="card" id="smartCard">
         <h2>خطوات ذكية تلقائية <small style="color:var(--muted);font-size:.85rem;font-weight:500">(تُطبَّق على الصورة المختارة في الأسفل)</small></h2>
         <div class="smart-step">
@@ -319,11 +356,10 @@
           <h2>صور الدفعة (<span id="photoCount">0</span>)</h2>
           <button class="mini-btn" id="addPhotosBtn" type="button">إضافة صور</button>
         </div>
-        <p class="stage-hint" style="text-align:start;margin:0">كل صورة أسفل الأخرى، ولكل واحدة ضبطها الخاص المستقل. اضغط على أي صورة لتصبح هي المعروضة في محرر الضبط بالأسفل، وحدّد عدد نسخها من حقل «عدد النسخ» — تعديلاتك محفوظة لكل صورة عند التنقل بينها.</p>
+        <p class="stage-hint" style="text-align:start;margin:0">كل صورة أسفل الأخرى، ولكل واحدة ضبطها الخاص المستقل وباقة طباعتها الخاصة بها. اضغط على أي صورة لتصبح هي المعروضة في محرر الضبط، واختر باقتها الجاهزة (8 صور على ورقة 10×15 أو 12 صورة على ورقة 15×20 أو تلقائي أو باقة مخصصة) — تعديلاتك محفوظة لكل صورة عند التنقل بينها.</p>
         <div id="photoList"></div>
       </section>
 
-      <main class="grid">
         <!-- Editor column -->
         <section class="card">
           <div class="card-head">
@@ -418,27 +454,66 @@
             </div>
             <div class="warn">ميزة تجريبية: تعمل جيداً عندما تكون خلفية صورتك بلون واحد واضح (حائط أبيض مثلاً). قد لا تكون النتيجة مثالية مع الخلفيات الملوّنة أو المزدحمة.</div>
           </div>
+
+          <h3>باقة طباعة هذه الصورة</h3>
+          <div class="pkg-wrap" style="margin-top:2px">
+            <label>الباقة
+              <select id="activePkgSelect" class="pkg-select" aria-label="باقة طباعة الصورة المختارة"></select>
+            </label>
+            <label id="activeAutoWrap" hidden>مقاس الورقة
+              <select id="activeAutoSheet" class="pkg-select" aria-label="مقاس الورقة للوضع التلقائي">
+                <option value="s10x15">10 × 15 سم</option>
+                <option value="s15x20">15 × 20 سم</option>
+                <option value="a4">A4</option>
+              </select>
+            </label>
+            <label>عدد الأوراق
+              <input type="number" id="activeSheetsInput" class="sheets-input" min="1" max="20" step="1" value="1" aria-label="عدد أوراق الصورة المختارة" />
+            </label>
+          </div>
+          <p class="stage-hint" style="text-align:start">كل صورة تُطبع وحدها على أوراق باقتها كاملةً — لا تُخلط صورتان على ورقة واحدة أبداً، ومقاس الصورة نفسه (3.5 × 4.5) لا يتغيّر بتغيّر الورقة.</p>
         </section>
 
-        <!-- Sheet column -->
+        <!-- Print settings -->
         <section class="card">
-          <h2>٢ — ورقة الطباعة والتحميل</h2>
-          <h3>نوع الورقة</h3>
-          <div class="seg" id="sheetSeg">
-            <button class="preset active" type="button" data-sheet="s10x15">ورقة 10 × 15 سم<small>8 صور — 4 × 2</small></button>
-            <button class="preset" type="button" data-sheet="s15x20">ورقة 15 × 20 سم<small>12 صورة — 4 × 3</small></button>
-            <button class="preset" type="button" data-sheet="a4">ورقة A4<small>العدد تلقائي حسب المقاس</small></button>
-          </div>
-          <h3>نمط الطباعة</h3>
-          <div class="seg" id="modeSeg">
-            <button class="preset active" type="button" data-mode="together">دفعة واحدة<small>نسخ كل الصور معاً في أوراق متتابعة</small></button>
-            <button class="preset" type="button" data-mode="separate">دفعات منفصلة<small>لكل صورة أوراقها الخاصة بها</small></button>
-          </div>
+          <h2>إعدادات الطباعة</h2>
           <div class="switch-row">
-            <span class="txt">خطوط القصّ<small>خطوط رمادية خفيفة حول كل صورة لتسهيل القصّ بالمقص</small></span>
+            <span class="txt">خطوط قصّ حول كل صورة<small>حدود متقطعة حول كل صورة على حدة</small></span>
             <button class="switch" id="cutSwitch" type="button" aria-pressed="true" aria-label="خطوط القص"></button>
           </div>
+          <div class="switch-row">
+            <span class="txt">خطوط قصّ ممتدة حتى حواف الورقة<small>خطوط رفيعة تمتد من حواف كل صورة حتى حافتي الورقة، لتسهيل القصّ بالمقص أو القاطع</small></span>
+            <button class="switch" id="cutExtendSwitch" type="button" aria-pressed="true" aria-label="خطوط قص ممتدة حتى الحواف"></button>
+          </div>
 
+          <h3>باقاتي المخصصة — مقاس وتقسيم جديد</h3>
+          <p class="stage-hint" style="text-align:start;margin:0">أضف مقاس ورقة وتقسيماً جديداً (مثلاً ورقة 13×18 تُقسَّم 3 أعمدة × 3 صفوف = 9 صور) وستظهر الباقة في قائمة باقات كل صورة، وتبقى محفوظة في هذا المتصفح لاستعمالها في أي وقت لاحقاً.</p>
+          <div class="pkg-form">
+            <div class="fld full"><label for="cpName">اسم الباقة (اختياري)</label><input type="text" id="cpName" placeholder="مثال: ورقة 13×18 — 9 صور" /></div>
+            <div class="fld"><label for="cpW">عرض الورقة (سم)</label><input type="number" id="cpW" min="5" max="60" step="0.5" value="13" inputmode="decimal" /></div>
+            <div class="fld"><label for="cpH">ارتفاع الورقة (سم)</label><input type="number" id="cpH" min="5" max="60" step="0.5" value="18" inputmode="decimal" /></div>
+            <div class="fld"><label for="cpCols">عدد الأعمدة</label><input type="number" id="cpCols" min="1" max="10" step="1" value="3" /></div>
+            <div class="fld"><label for="cpRows">عدد الصفوف</label><input type="number" id="cpRows" min="1" max="10" step="1" value="3" /></div>
+          </div>
+          <div class="row-btns"><button class="mini-btn" id="addPkgBtn" type="button">＋ إضافة مقاس وتقسيم جديد</button></div>
+          <div id="customPkgList"></div>
+        </section>
+      </div>
+
+      <div class="col-result">
+        <!-- Result column: the finished single photo, live -->
+        <section class="card">
+          <h2>٢ — النتيجة النهائية <small id="resultName" style="color:var(--muted);font-size:.85rem;font-weight:500"></small></h2>
+          <div class="result-stage">
+            <canvas id="resultCanvas" width="413" height="531"></canvas>
+            <p class="sheet-info" id="resultInfo">—</p>
+          </div>
+          <p class="stage-hint">هذه هي الصورة الفردية النهائية التي ستُقسَّم على الورقة — تتحدّث مباشرة مع كل تعديل تجريه في عمود الإعدادات.</p>
+        </section>
+
+        <!-- Sheets column -->
+        <section class="card">
+          <h2>٣ — أوراق الطباعة والتحميل</h2>
           <div class="sheet-preview">
             <div id="sheetsPreview"></div>
             <p class="sheet-info" id="sheetInfo">—</p>
@@ -462,9 +537,10 @@
               طباعة الأوراق
             </button>
           </div>
-          <p class="note" style="text-align:start">نصيحة للطباعة: اختر في الطابعة مقاس الورقة نفسه (10×15 أو 15×20 أو A4) وفعّل خيار «المقاس الحقيقي 100%» حتى تخرج الصور بمقاسها الصحيح بالضبط.</p>
+          <p class="note" style="text-align:start">نصيحة للطباعة: ملف PDF يحمل كل ورقة بمقاسها الحقيقي الخاص بها — اختر في الطابعة «المقاس الحقيقي 100%» وبدّل مقاس الورقة في الدرج حسب كل صفحة حتى تخرج الصور بمقاسها الصحيح بالضبط.</p>
         </section>
-      </main>
+      </div>
+      </div>
       </div>
     </div>
 
@@ -507,6 +583,56 @@
       function invertAlpha(alpha) {
         for (var i = 0; i < alpha.length; i++) alpha[i] = 255 - alpha[i];
       }
+      /* 1px erosion: every pixel takes the MINIMUM alpha of its 3x3
+         neighborhood. This shaves the outermost ~1px ring of the person —
+         exactly where background-colored fringe pixels live — while the
+         interior (whose neighbors are all opaque) is left untouched. */
+      function erodeAlpha(alpha, w, h) {
+        var out = new Uint8ClampedArray(alpha.length);
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            var m = 255;
+            for (var dy = -1; dy <= 1; dy++) {
+              var yy = y + dy; if (yy < 0) yy = 0; if (yy > h - 1) yy = h - 1;
+              for (var dx = -1; dx <= 1; dx++) {
+                var xx = x + dx; if (xx < 0) xx = 0; if (xx > w - 1) xx = w - 1;
+                var v = alpha[yy * w + xx];
+                if (v < m) m = v;
+              }
+            }
+            out[y * w + x] = m;
+          }
+        }
+        return out;
+      }
+      /* Defringe: semi-transparent edge pixels (0 < a < 255) inherit the RGB of
+         the nearest fully opaque foreground pixel instead of keeping their
+         original background-contaminated color, so no colored halo survives
+         compositing over the new background. */
+      function defringeData(data, w, h) {
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            var i = (y * w + x) * 4;
+            var a = data[i + 3];
+            if (a === 0 || a >= 255) continue;
+            var found = -1;
+            for (var r = 1; r <= 4 && found < 0; r++) {
+              for (var dy = -r; dy <= r && found < 0; dy++) {
+                for (var dx = -r; dx <= r; dx++) {
+                  if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+                  var xx = x + dx, yy = y + dy;
+                  if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+                  var j = (yy * w + xx) * 4;
+                  if (data[j + 3] >= 250) { found = j; break; }
+                }
+              }
+            }
+            if (found >= 0) {
+              data[i] = data[found]; data[i + 1] = data[found + 1]; data[i + 2] = data[found + 2];
+            }
+          }
+        }
+      }
       /* PURE-MASK-END */
 
       /* ================= Pure sheet planning (DOM-free) ================= */
@@ -516,62 +642,56 @@
         if (sheetId === "s15x20") return { id: "15x20", wmm: 200, hmm: 150, W: cmPx(20), H: cmPx(15), cols: 4, rows: 3 };
         return { id: "a4", wmm: 210, hmm: 297, W: cmPx(21), H: cmPx(29.7), cols: 0, rows: 0 };
       }
-      function computeLayout(spec, pw, ph) {
-        var positions = [];
-        if (spec.cols > 0 && pw * spec.cols <= spec.W && ph * spec.rows <= spec.H) {
-          var gx = (spec.W - pw * spec.cols) / (spec.cols + 1);
-          var gy = (spec.H - ph * spec.rows) / (spec.rows + 1);
-          for (var r = 0; r < spec.rows; r++)
-            for (var c = 0; c < spec.cols; c++)
-              positions.push([gx + c * (pw + gx), gy + r * (ph + gy)]);
-          return positions;
-        }
-        var m = cmPx(0.5), g = cmPx(0.2);
-        var cols = Math.max(1, Math.floor((spec.W - 2 * m + g) / (pw + g)));
-        var rows = Math.max(1, Math.floor((spec.H - 2 * m + g) / (ph + g)));
-        var gridW = cols * pw + (cols - 1) * g, gridH = rows * ph + (rows - 1) * g;
-        var sx = (spec.W - gridW) / 2, sy = (spec.H - gridH) / 2;
-        for (var r2 = 0; r2 < rows; r2++)
-          for (var c2 = 0; c2 < cols; c2++)
-            positions.push([sx + c2 * (pw + g), sy + r2 * (ph + g)]);
-        return positions;
+      /* Positions for a fixed cols×rows grid, centered with even gaps.
+         Returns null when the grid cannot fit photos of this size. */
+      function gridPositions(W, H, pw, ph, cols, rows) {
+        if (cols < 1 || rows < 1 || pw * cols > W || ph * rows > H) return null;
+        var gx = (W - pw * cols) / (cols + 1);
+        var gy = (H - ph * rows) / (rows + 1);
+        var pos = [];
+        for (var r = 0; r < rows; r++)
+          for (var c = 0; c < cols; c++)
+            pos.push([gx + c * (pw + gx), gy + r * (ph + gy)]);
+        return pos;
       }
-      /* items: [{pw, ph, copies}] in order. mode: "together" | "separate".
-         Returns plans: [{tiles: [{item: index, x, y, w, h}]}]. In together mode,
-         consecutive photos of the same size share a sheet in order; a size change
-         starts a fresh sheet. In separate mode every photo starts fresh sheets. */
-      function planSheetsPure(spec, items, mode) {
-        var plans = [];
-        function newPlan() { var p = { tiles: [] }; plans.push(p); return p; }
-        if (mode === "separate") {
-          items.forEach(function (it, idx) {
-            var pos = computeLayout(spec, it.pw, it.ph);
-            var n = it.copies, i = 0;
-            while (i < n) {
-              var plan = newPlan();
-              var take = Math.min(pos.length, n - i);
-              for (var k = 0; k < take; k++)
-                plan.tiles.push({ item: idx, x: pos[k][0], y: pos[k][1], w: it.pw, h: it.ph });
-              i += take;
-            }
-          });
-          return plans;
+      /* Auto fill: as many photos as fit the sheet, tight margins and gaps
+         (a 10×15 sheet fills with the full 4×2 = 8, A4 with 5×6 = 30). */
+      function autoPositions(W, H, pw, ph) {
+        var m = cmPx(0.25), g = cmPx(0.15);
+        var cols = Math.max(1, Math.floor((W - 2 * m + g) / (pw + g)));
+        var rows = Math.max(1, Math.floor((H - 2 * m + g) / (ph + g)));
+        var gridW = cols * pw + (cols - 1) * g, gridH = rows * ph + (rows - 1) * g;
+        var sx = (W - gridW) / 2, sy = (H - gridH) / 2;
+        var pos = [];
+        for (var r = 0; r < rows; r++)
+          for (var c = 0; c < cols; c++)
+            pos.push([sx + c * (pw + g), sy + r * (ph + g)]);
+        return pos;
+      }
+      function computeLayout(W, H, pw, ph, cols, rows) {
+        if (cols > 0 && rows > 0) {
+          var g = gridPositions(W, H, pw, ph, cols, rows);
+          if (g) return g;
         }
-        var cur = null, curKey = null, pos = null, at = 0;
+        return autoPositions(W, H, pw, ph);
+      }
+      /* Package planning — the strict rule of this app: every photo is printed
+         ONLY on sheets of its own package size, each sheet filled with exactly
+         its package layout, and two photos are NEVER mixed on one sheet.
+         items: [{pw, ph, W, H, wmm, hmm, cols, rows, sheets}] where cols/rows
+         of 0 mean auto-fill and sheets is how many full sheets to produce.
+         Returns plans: [{item, W, H, wmm, hmm, tiles: [{x, y, w, h}]}]. */
+      function planPackagesPure(items) {
+        var plans = [];
         items.forEach(function (it, idx) {
-          var key = it.pw + "x" + it.ph;
-          var placed = 0;
-          while (placed < it.copies) {
-            if (!cur || curKey !== key) {
-              cur = newPlan(); pos = computeLayout(spec, it.pw, it.ph); at = 0; curKey = key;
-            }
-            var take = Math.min(pos.length - at, it.copies - placed);
-            for (var k = 0; k < take; k++) {
-              cur.tiles.push({ item: idx, x: pos[at][0], y: pos[at][1], w: it.pw, h: it.ph });
-              at++;
-            }
-            placed += take;
-            if (at >= pos.length) cur = null;
+          var pos = computeLayout(it.W, it.H, it.pw, it.ph, it.cols, it.rows);
+          var nSheets = Math.max(1, it.sheets || 1);
+          for (var s = 0; s < nSheets; s++) {
+            var plan = { item: idx, W: it.W, H: it.H, wmm: it.wmm, hmm: it.hmm, tiles: [] };
+            pos.forEach(function (p) {
+              plan.tiles.push({ x: p[0], y: p[1], w: it.pw, h: it.ph });
+            });
+            plans.push(plan);
           }
         });
         return plans;
@@ -591,11 +711,11 @@
           bg: "#ffffff", unify: false, unifyTol: 85
         };
       }
-      var photos = [];        // [{id, name, st, copies, copiesTouched, thumb}]
+      var photos = [];        // [{id, name, st, pkg, autoSheet, sheetCount, thumb}]
       var photoSeq = 0;
       var activeId = null;
       var state = null;       // active photo's state object (editor works on this)
-      var settings = { sheet: "s10x15", cutlines: true, guides: true, mode: "together" };
+      var settings = { cutlines: true, cutExtend: true, guides: true };
       var smartBusy = false;
 
       var editor = document.getElementById("editor");
@@ -613,11 +733,71 @@
         for (var i = 0; i < photos.length; i++) if (photos[i].id === activeId) return photos[i];
         return null;
       }
-      function sheetSpec() { return sheetSpecFor(settings.sheet); }
-      function effCopies(ph) {
-        if (ph.copiesTouched) return clamp(Math.round(ph.copies) || 1, 1, 99);
-        var spec = sheetSpec();
-        return Math.max(1, computeLayout(spec, cmPx(ph.st.photoW), cmPx(ph.st.photoH)).length);
+      /* ================= Print packages =================
+         Every photo owns ONE package: a fixed sheet size + grid. Ready-made
+         packages (8 on 10×15, 12 on 15×20), an auto-fill package, and custom
+         packages the user defines (persisted in this browser only). */
+      var PKG_LS_KEY = "dzphotoid.packages.v1";
+      var customPackages = [];
+      try {
+        var rawPkgs = localStorage.getItem(PKG_LS_KEY);
+        if (rawPkgs) {
+          var parsedPkgs = JSON.parse(rawPkgs);
+          if (Array.isArray(parsedPkgs)) {
+            customPackages = parsedPkgs.filter(function (p) {
+              return p && p.id && isFinite(p.wcm) && isFinite(p.hcm) && isFinite(p.cols) && isFinite(p.rows);
+            });
+          }
+        }
+      } catch (e) { customPackages = []; }
+      function saveCustomPackages() {
+        try { localStorage.setItem(PKG_LS_KEY, JSON.stringify(customPackages)); } catch (e) {}
+      }
+      function findCustomPackage(id) {
+        for (var i = 0; i < customPackages.length; i++)
+          if (customPackages[i].id === id) return customPackages[i];
+        return null;
+      }
+      var AUTO_SHEET_NAMES = { s10x15: "10 × 15 سم", s15x20: "15 × 20 سم", a4: "A4" };
+      /* Resolve a photo's chosen package to concrete sheet geometry.
+         The photo's own size never changes with the sheet — only the grid does. */
+      function packageDef(ph) {
+        if (ph.pkg === "p12") {
+          return { label: "12 صورة — ورقة 15×20", W: cmPx(20), H: cmPx(15), wmm: 200, hmm: 150, cols: 4, rows: 3 };
+        }
+        if (ph.pkg === "auto") {
+          var s = sheetSpecFor(ph.autoSheet || "s10x15");
+          return { label: "تلقائي — ورقة " + (AUTO_SHEET_NAMES[ph.autoSheet] || "10 × 15 سم"),
+                   W: s.W, H: s.H, wmm: s.wmm, hmm: s.hmm, cols: 0, rows: 0 };
+        }
+        if (ph.pkg && ph.pkg !== "p8") {
+          var cp = findCustomPackage(ph.pkg);
+          if (cp) {
+            return { label: cp.name, W: cmPx(cp.wcm), H: cmPx(cp.hcm),
+                     wmm: Math.round(cp.wcm * 10), hmm: Math.round(cp.hcm * 10),
+                     cols: cp.cols, rows: cp.rows };
+          }
+        }
+        return { label: "8 صور — ورقة 10×15", W: cmPx(15), H: cmPx(10), wmm: 150, hmm: 100, cols: 4, rows: 2 };
+      }
+      function perSheetCount(ph) {
+        var def = packageDef(ph);
+        return computeLayout(def.W, def.H, cmPx(ph.st.photoW), cmPx(ph.st.photoH), def.cols, def.rows).length;
+      }
+      function fillPkgSelect(sel, value) {
+        sel.innerHTML = "";
+        [["p8", "8 صور — ورقة 10×15 سم"], ["p12", "12 صورة — ورقة 15×20 سم"], ["auto", "تلقائي — املأ الورقة"]].forEach(function (o) {
+          var opt = document.createElement("option");
+          opt.value = o[0]; opt.textContent = o[1];
+          sel.appendChild(opt);
+        });
+        customPackages.forEach(function (cp) {
+          var opt = document.createElement("option");
+          opt.value = cp.id; opt.textContent = cp.name;
+          sel.appendChild(opt);
+        });
+        sel.value = value;
+        if (sel.value !== value) sel.value = "p8";
       }
 
       /* ================= Image loading (multi) ================= */
@@ -697,7 +877,7 @@
             var ph = {
               id: ++photoSeq,
               name: files[i].name || ("صورة " + (photos.length + 1)),
-              st: st, copies: 8, copiesTouched: false, thumb: null
+              st: st, pkg: "p8", autoSheet: "s10x15", sheetCount: 1, thumb: null
             };
             buildSrcFor(st);
             photos.push(ph);
@@ -722,6 +902,8 @@
       function photoTags(ph) {
         var tags = [];
         tags.push(ph.st.photoW + " × " + ph.st.photoH + " سم");
+        tags.push(packageDef(ph).label);
+        tags.push(perSheetCount(ph) + " في الورقة" + ((ph.sheetCount || 1) > 1 ? " × " + ph.sheetCount + " أوراق" : ""));
         if (ph.st.bgRemoved) tags.push("الخلفية مُزالة ✓");
         else if (ph.st.cutout) tags.push("إزالة الخلفية جاهزة");
         if (ph.st.unify) tags.push("خلفية موحّدة");
@@ -751,21 +933,39 @@
           tags.textContent = photoTags(ph);
           meta.appendChild(tags);
           var cw = document.createElement("div");
-          cw.className = "copies-wrap";
+          cw.className = "pkg-wrap";
           var lab = document.createElement("label");
-          lab.textContent = "عدد النسخ ";
-          lab.htmlFor = "copies-" + ph.id;
-          var inp = document.createElement("input");
-          inp.type = "number"; inp.min = "1"; inp.max = "99"; inp.step = "1";
-          inp.className = "copies-input"; inp.id = "copies-" + ph.id;
-          inp.value = effCopies(ph);
-          inp.dataset.photoid = ph.id;
-          lab.appendChild(inp);
+          lab.textContent = "باقة الطباعة ";
+          var sel = document.createElement("select");
+          sel.className = "pkg-select"; sel.dataset.photoid = ph.id;
+          sel.setAttribute("aria-label", "باقة طباعة " + ph.name);
+          fillPkgSelect(sel, ph.pkg);
+          lab.appendChild(sel);
           cw.appendChild(lab);
-          var hint = document.createElement("span");
-          hint.style.color = "var(--muted)"; hint.style.fontSize = ".82rem";
-          hint.textContent = ph.copiesTouched ? "" : "(يملأ الورقة)";
-          cw.appendChild(hint);
+          if (ph.pkg === "auto") {
+            var lab2 = document.createElement("label");
+            lab2.textContent = "الورقة ";
+            var asel = document.createElement("select");
+            asel.className = "auto-sheet-select"; asel.dataset.photoid = ph.id;
+            asel.setAttribute("aria-label", "مقاس الورقة للوضع التلقائي");
+            [["s10x15", "10 × 15 سم"], ["s15x20", "15 × 20 سم"], ["a4", "A4"]].forEach(function (o) {
+              var opt = document.createElement("option");
+              opt.value = o[0]; opt.textContent = o[1];
+              asel.appendChild(opt);
+            });
+            asel.value = ph.autoSheet || "s10x15";
+            lab2.appendChild(asel);
+            cw.appendChild(lab2);
+          }
+          var lab3 = document.createElement("label");
+          lab3.textContent = "عدد الأوراق ";
+          var sinp = document.createElement("input");
+          sinp.type = "number"; sinp.min = "1"; sinp.max = "20"; sinp.step = "1";
+          sinp.className = "sheets-input"; sinp.dataset.photoid = ph.id;
+          sinp.value = ph.sheetCount || 1;
+          sinp.setAttribute("aria-label", "عدد أوراق " + ph.name);
+          lab3.appendChild(sinp);
+          cw.appendChild(lab3);
           meta.appendChild(cw);
           item.appendChild(meta);
 
@@ -786,35 +986,43 @@
           deletePhoto(parseInt(del.dataset.photoid, 10));
           return;
         }
-        if (e.target.classList && e.target.classList.contains("copies-input")) return;
+        if (e.target.classList && (e.target.classList.contains("sheets-input") ||
+            e.target.classList.contains("pkg-select") ||
+            e.target.classList.contains("auto-sheet-select"))) return;
         var item = e.target.closest ? e.target.closest(".photo-item") : null;
         if (item) activatePhoto(parseInt(item.dataset.id, 10), true);
       });
+      function photoById(id) {
+        for (var i = 0; i < photos.length; i++) if (photos[i].id === id) return photos[i];
+        return null;
+      }
       photoListEl.addEventListener("input", function (e) {
-        if (!e.target.classList || !e.target.classList.contains("copies-input")) return;
-        var id = parseInt(e.target.dataset.photoid, 10);
-        for (var i = 0; i < photos.length; i++) {
-          if (photos[i].id === id) {
-            photos[i].copiesTouched = true;
-            photos[i].copies = clamp(parseInt(e.target.value, 10) || 1, 1, 99);
-          }
-        }
-        scheduleSheet();
+        if (!e.target.classList || !e.target.classList.contains("sheets-input")) return;
+        var ph = photoById(parseInt(e.target.dataset.photoid, 10));
+        if (ph) { ph.sheetCount = clamp(parseInt(e.target.value, 10) || 1, 1, 20); scheduleSheet(); }
       });
       photoListEl.addEventListener("change", function (e) {
-        if (!e.target.classList || !e.target.classList.contains("copies-input")) return;
-        e.target.value = clamp(parseInt(e.target.value, 10) || 1, 1, 99);
-        renderPhotoList();
-        updateSheet();
+        if (!e.target.classList) return;
+        var ph = photoById(parseInt(e.target.dataset.photoid, 10));
+        if (!ph) return;
+        if (e.target.classList.contains("pkg-select")) {
+          ph.pkg = e.target.value;
+          renderPhotoList();
+          if (ph.id === activeId) syncPkgControls();
+          updateSheet();
+        } else if (e.target.classList.contains("auto-sheet-select")) {
+          ph.autoSheet = e.target.value;
+          renderPhotoList();
+          if (ph.id === activeId) syncPkgControls();
+          updateSheet();
+        } else if (e.target.classList.contains("sheets-input")) {
+          ph.sheetCount = clamp(parseInt(e.target.value, 10) || 1, 1, 20);
+          e.target.value = ph.sheetCount;
+          renderPhotoList();
+          if (ph.id === activeId) syncPkgControls();
+          updateSheet();
+        }
       });
-      function refreshCopiesInputs() {
-        var inputs = photoListEl.querySelectorAll(".copies-input");
-        inputs.forEach(function (inp) {
-          var id = parseInt(inp.dataset.photoid, 10);
-          for (var i = 0; i < photos.length; i++)
-            if (photos[i].id === id && document.activeElement !== inp) inp.value = effCopies(photos[i]);
-        });
-      }
       function deletePhoto(id) {
         if (smartBusy) { toast("انتظر حتى تنتهي المعالجة الحالية"); return; }
         var idx = -1;
@@ -841,6 +1049,14 @@
       function setSlider(id, outId, v) {
         document.getElementById(id).value = v;
         document.getElementById(outId).textContent = v + "%";
+      }
+      function syncPkgControls() {
+        var ph = activePhoto();
+        if (!ph) return;
+        fillPkgSelect(document.getElementById("activePkgSelect"), ph.pkg);
+        document.getElementById("activeAutoWrap").hidden = ph.pkg !== "auto";
+        document.getElementById("activeAutoSheet").value = ph.autoSheet || "s10x15";
+        document.getElementById("activeSheetsInput").value = ph.sheetCount || 1;
       }
       function syncControlsFromState() {
         if (!state) return;
@@ -873,6 +1089,7 @@
         document.getElementById("smartStatus").textContent = "";
         var ph = activePhoto();
         document.getElementById("activePhotoName").textContent = ph ? "— " + ph.name : "";
+        syncPkgControls();
       }
       function activatePhoto(id, scroll) {
         if (smartBusy) { toast("انتظر حتى تنتهي المعالجة الحالية"); return; }
@@ -1250,23 +1467,41 @@
         return tileCache[ph.id];
       }
       function planSheets() {
-        var spec = sheetSpec();
         var items = photos.map(function (ph) {
-          return { pw: cmPx(ph.st.photoW), ph: cmPx(ph.st.photoH), copies: effCopies(ph) };
+          var def = packageDef(ph);
+          return { pw: cmPx(ph.st.photoW), ph: cmPx(ph.st.photoH),
+                   W: def.W, H: def.H, wmm: def.wmm, hmm: def.hmm,
+                   cols: def.cols, rows: def.rows, sheets: ph.sheetCount || 1 };
         });
-        var plans = planSheetsPure(spec, items, settings.mode);
-        return { spec: spec, plans: plans };
+        return { plans: planPackagesPure(items) };
       }
-      function renderSheetCanvas(plan, spec) {
+      function renderSheetCanvas(plan) {
         var c = document.createElement("canvas");
-        c.width = spec.W; c.height = spec.H;
+        c.width = plan.W; c.height = plan.H;
         var ctx = c.getContext("2d");
-        var first = plan.tiles[0];
-        ctx.fillStyle = first ? photos[first.item].st.bg : "#ffffff";
-        ctx.fillRect(0, 0, spec.W, spec.H);
+        var ph = photos[plan.item];
+        ctx.fillStyle = ph ? ph.st.bg : "#ffffff";
+        ctx.fillRect(0, 0, plan.W, plan.H);
+        if (!ph) return c;
+        var tile = tileFor(ph);
         plan.tiles.forEach(function (t) {
-          ctx.drawImage(tileFor(photos[t.item]), t.x, t.y);
+          ctx.drawImage(tile, t.x, t.y);
         });
+        if (settings.cutExtend && plan.tiles.length) {
+          // Thin solid lines running from every photo edge to the sheet edges.
+          ctx.save();
+          ctx.strokeStyle = "rgba(110,110,110,0.5)";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          var xs = {}, ys = {};
+          plan.tiles.forEach(function (t) {
+            xs[t.x] = 1; xs[t.x + t.w] = 1; ys[t.y] = 1; ys[t.y + t.h] = 1;
+          });
+          Object.keys(xs).forEach(function (x) { ctx.moveTo(+x, 0); ctx.lineTo(+x, plan.H); });
+          Object.keys(ys).forEach(function (y) { ctx.moveTo(0, +y); ctx.lineTo(plan.W, +y); });
+          ctx.stroke();
+          ctx.restore();
+        }
         if (settings.cutlines) {
           ctx.save();
           ctx.strokeStyle = "rgba(90,90,90,0.55)";
@@ -1306,16 +1541,41 @@
           }
         });
       }
+      function updateResultPreview() {
+        var ph = activePhoto();
+        if (!ph) return;
+        var tile = tileFor(ph);
+        var rc = document.getElementById("resultCanvas");
+        rc.width = tile.width; rc.height = tile.height;
+        rc.getContext("2d").drawImage(tile, 0, 0);
+        document.getElementById("resultName").textContent = "— " + ph.name;
+        document.getElementById("resultInfo").textContent =
+          ph.st.photoW + " × " + ph.st.photoH + " سم · " + tile.width + " × " + tile.height +
+          " بكسل · 300 DPI · الباقة: " + packageDef(ph).label + " (" + perSheetCount(ph) + " في الورقة)";
+      }
       function updateSheet() {
         if (!photos.length) return;
         tileCache = {};
-        var res = planSheets();
-        var spec = res.spec, plans = res.plans;
+        var plans = planSheets().plans;
         var wrap = document.getElementById("sheetsPreview");
         wrap.innerHTML = "";
         var MAXP = 8;
+        var perPhotoSeen = {};
         plans.slice(0, MAXP).forEach(function (plan) {
-          wrap.appendChild(renderSheetCanvas(plan, spec));
+          var ph = photos[plan.item];
+          perPhotoSeen[plan.item] = (perPhotoSeen[plan.item] || 0) + 1;
+          var box = document.createElement("div");
+          var lab = document.createElement("p");
+          lab.className = "sheet-label";
+          lab.textContent = ph.name + " — " + packageDef(ph).label;
+          var sm = document.createElement("small");
+          sm.textContent = " · ورقة " + perPhotoSeen[plan.item] + " من " + (ph.sheetCount || 1) +
+            " · مقاس الورقة " + (plan.wmm / 10) + " × " + (plan.hmm / 10) + " سم · " +
+            plan.tiles.length + " صور";
+          lab.appendChild(sm);
+          box.appendChild(lab);
+          box.appendChild(renderSheetCanvas(plan));
+          wrap.appendChild(box);
         });
         if (plans.length > MAXP) {
           var more = document.createElement("p");
@@ -1326,34 +1586,104 @@
         var total = 0;
         plans.forEach(function (p) { total += p.tiles.length; });
         document.getElementById("sheetInfo").textContent =
-          plans.length + (plans.length === 1 ? " ورقة" : " أوراق") + " ستُنتج · " +
-          total + " نسخة إجمالاً · حجم الورقة " + spec.W + " × " + spec.H +
-          " بكسل · الدقة 300 DPI";
+          "المجموع: " + plans.length + (plans.length === 1 ? " ورقة" : " أوراق") + " ستُنتج · " +
+          total + " نسخة إجمالاً · كل ورقة بمقاس باقتها الحقيقي · الدقة 300 DPI";
+        updateResultPreview();
         updateActiveThumb();
-        refreshCopiesInputs();
       }
-      document.querySelectorAll("#sheetSeg .preset").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          document.querySelectorAll("#sheetSeg .preset").forEach(function (b) { b.classList.remove("active"); });
-          this.classList.add("active");
-          settings.sheet = this.dataset.sheet;
-          updateSheet();
-        });
-      });
-      document.querySelectorAll("#modeSeg .preset").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          document.querySelectorAll("#modeSeg .preset").forEach(function (b) { b.classList.remove("active"); });
-          this.classList.add("active");
-          settings.mode = this.dataset.mode;
-          updateSheet();
-        });
-      });
       var cutSwitch = document.getElementById("cutSwitch");
       cutSwitch.addEventListener("click", function () {
         settings.cutlines = !settings.cutlines;
         this.setAttribute("aria-pressed", String(settings.cutlines));
         updateSheet();
       });
+      var cutExtendSwitch = document.getElementById("cutExtendSwitch");
+      cutExtendSwitch.addEventListener("click", function () {
+        settings.cutExtend = !settings.cutExtend;
+        this.setAttribute("aria-pressed", String(settings.cutExtend));
+        updateSheet();
+      });
+
+      /* Active photo's package controls (in the editor card) */
+      document.getElementById("activePkgSelect").addEventListener("change", function () {
+        var ph = activePhoto();
+        if (!ph) return;
+        ph.pkg = this.value;
+        renderPhotoList(); syncPkgControls(); updateSheet();
+      });
+      document.getElementById("activeAutoSheet").addEventListener("change", function () {
+        var ph = activePhoto();
+        if (!ph) return;
+        ph.autoSheet = this.value;
+        renderPhotoList(); updateSheet();
+      });
+      document.getElementById("activeSheetsInput").addEventListener("input", function () {
+        var ph = activePhoto();
+        if (!ph) return;
+        ph.sheetCount = clamp(parseInt(this.value, 10) || 1, 1, 20);
+        scheduleSheet();
+      });
+      document.getElementById("activeSheetsInput").addEventListener("change", function () {
+        var ph = activePhoto();
+        if (!ph) return;
+        this.value = ph.sheetCount || 1;
+        renderPhotoList(); updateSheet();
+      });
+
+      /* Custom packages: form, list, persistence (this browser only) */
+      function renderCustomPkgList() {
+        var wrap = document.getElementById("customPkgList");
+        if (!wrap) return;
+        wrap.innerHTML = "";
+        customPackages.forEach(function (cp) {
+          var row = document.createElement("div");
+          row.className = "custom-pkg-item";
+          var span = document.createElement("span");
+          span.textContent = cp.name + " — ورقة " + cp.wcm + " × " + cp.hcm + " سم · تقسيم " +
+            cp.cols + " أعمدة × " + cp.rows + " صفوف = " + (cp.cols * cp.rows) + " صور";
+          row.appendChild(span);
+          var del = document.createElement("button");
+          del.type = "button"; del.className = "mini-btn danger";
+          del.textContent = "حذف الباقة";
+          del.dataset.pkgid = cp.id;
+          row.appendChild(del);
+          wrap.appendChild(row);
+        });
+      }
+      document.getElementById("customPkgList").addEventListener("click", function (e) {
+        var btn = e.target.closest ? e.target.closest("[data-pkgid]") : null;
+        if (!btn) return;
+        var id = btn.dataset.pkgid;
+        customPackages = customPackages.filter(function (p) { return p.id !== id; });
+        saveCustomPackages();
+        photos.forEach(function (ph) { if (ph.pkg === id) ph.pkg = "p8"; });
+        renderCustomPkgList(); renderPhotoList(); syncPkgControls(); updateSheet();
+        toast("حُذفت الباقة المخصصة");
+      });
+      document.getElementById("addPkgBtn").addEventListener("click", function () {
+        var name = document.getElementById("cpName").value.trim();
+        var w = parseFloat(document.getElementById("cpW").value);
+        var h = parseFloat(document.getElementById("cpH").value);
+        var cols = parseInt(document.getElementById("cpCols").value, 10);
+        var rows = parseInt(document.getElementById("cpRows").value, 10);
+        if (!(w >= 5 && w <= 60) || !(h >= 5 && h <= 60)) { toast("أدخل مقاس ورقة صحيحاً بين 5 و 60 سم"); return; }
+        if (!(cols >= 1 && cols <= 10) || !(rows >= 1 && rows <= 10)) { toast("أدخل عدد أعمدة وصفوف بين 1 و 10"); return; }
+        if (cols * 3.5 > w || rows * 4.5 > h) {
+          toast("هذا التقسيم لا يتّسع لصور 3.5 × 4.5 سم على هذه الورقة — كبّر الورقة أو قلّل الأعمدة والصفوف");
+          return;
+        }
+        var cp = {
+          id: "c" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+          name: name || ((cols * rows) + " صور — ورقة " + w + "×" + h),
+          wcm: w, hcm: h, cols: cols, rows: rows
+        };
+        customPackages.push(cp);
+        saveCustomPackages();
+        document.getElementById("cpName").value = "";
+        renderCustomPkgList(); renderPhotoList(); syncPkgControls();
+        toast("أُضيفت الباقة «" + cp.name + "» — اخترها لأي صورة من قائمة «باقة الطباعة»");
+      });
+      renderCustomPkgList();
 
       /* ================= Downloads ================= */
       function patchJpegDPI(u8) {
@@ -1404,11 +1734,10 @@
           tileCache = {};
           var res = planSheets();
           for (var i = 0; i < res.plans.length; i++) {
-            var cnv = renderSheetCanvas(res.plans[i], res.spec);
+            var plan = res.plans[i];
+            var cnv = renderSheetCanvas(plan);
             var bytes = await canvasJpegBytes(cnv, 0.92);
-            var name = res.plans.length === 1
-              ? "sheet-" + res.spec.id + ".jpg"
-              : "sheet-" + res.spec.id + "-" + (i + 1) + ".jpg";
+            var name = "sheet-" + (i + 1) + "-" + plan.wmm + "x" + plan.hmm + "mm.jpg";
             saveBlob(new Blob([bytes], { type: "image/jpeg" }), name);
           }
           toast("حُمّلت " + res.plans.length + (res.plans.length === 1 ? " ورقة" : " أوراق"));
@@ -1421,11 +1750,12 @@
           var res = planSheets();
           var pages = [];
           for (var i = 0; i < res.plans.length; i++) {
-            var cnv = renderSheetCanvas(res.plans[i], res.spec);
+            var plan = res.plans[i];
+            var cnv = renderSheetCanvas(plan);
             var jpg = await canvasJpegBytes(cnv, 0.92);
-            pages.push({ jpg: jpg, w: cnv.width, h: cnv.height, spec: res.spec });
+            pages.push({ jpg: jpg, w: cnv.width, h: cnv.height, spec: { wmm: plan.wmm, hmm: plan.hmm } });
           }
-          saveBlob(buildPdf(pages), "sheets-" + res.spec.id + ".pdf");
+          saveBlob(buildPdf(pages), "sheets.pdf");
         });
       });
 
@@ -1675,7 +2005,7 @@
         if (!blob) throw new Error("toBlob failed");
         var outBlob = await removeBackground(blob, {
           publicPath: "https://cdn.jsdelivr.net/npm/@imgly/background-removal-js@1/dist/",
-          model: "isnet_fp16",
+          model: "isnet",
           output: { format: "image/png", quality: 1, type: "foreground" },
           progress: function (key, current, total) {
             if (total && total > 0 && String(key).indexOf("fetch") === 0) {
@@ -1757,10 +2087,39 @@
         }
         return maskCanvas;
       }
-      /* Upscale the work-size mask to full resolution, feather its edges (~1px),
-         and cut the person out of the full-resolution original. */
+      /* Edge refinement step 1 (at the mask's native high resolution, before
+         any resampling): erode the alpha by ~1px to cut the background-colored
+         fringe ring that models leave around hair, ears and shoulders. */
+      function refineMaskAlpha(maskCanvas) {
+        var w = maskCanvas.width, h = maskCanvas.height;
+        if (!w || !h) return;
+        var ctx = maskCanvas.getContext("2d");
+        var img;
+        try { img = ctx.getImageData(0, 0, w, h); } catch (e) { return; }
+        var d = img.data;
+        var alpha = new Uint8ClampedArray(w * h);
+        for (var i = 0; i < w * h; i++) alpha[i] = d[i * 4 + 3];
+        var er = erodeAlpha(alpha, w, h);
+        for (var j = 0; j < w * h; j++) d[j * 4 + 3] = er[j];
+        ctx.putImageData(img, 0, 0);
+      }
+      /* Edge refinement step 3 (on the finished cutout): semi-transparent edge
+         pixels take the color of the nearest opaque foreground pixel, so no
+         background-colored halo survives into the final composite. */
+      function defringeCanvas(c) {
+        var ctx = c.getContext("2d");
+        var img;
+        try { img = ctx.getImageData(0, 0, c.width, c.height); } catch (e) { return; }
+        defringeData(img.data, c.width, c.height);
+        ctx.putImageData(img, 0, 0);
+      }
+      /* Refine the mask (orientation fix, then 1px erosion at native
+         resolution), upscale it to full resolution, feather its edges (~1px,
+         anti-aliasing only — not a wide blur), cut the person out of the
+         full-resolution original, and defringe the result. */
       function buildCutout(maskCanvas, srcCanvas) {
         fixMaskOrientation(maskCanvas);
+        refineMaskAlpha(maskCanvas);
         var W = srcCanvas.width, H = srcCanvas.height;
         var maskFull = document.createElement("canvas");
         maskFull.width = W; maskFull.height = H;
@@ -1779,6 +2138,7 @@
         octx.drawImage(srcCanvas, 0, 0);
         octx.globalCompositeOperation = "destination-in";
         octx.drawImage(blurred, 0, 0);
+        defringeCanvas(out);
         return out;
       }
       function showBgResultUI() {
@@ -1803,7 +2163,7 @@
         setBgProgress(2, "أول مرة فقط: سيُحمَّل نموذج الذكاء الاصطناعي من الإنترنت، وبعده يعمل بلا إنترنت من ذاكرة المتصفح.");
         (async function () {
           try {
-            var work = makeWorkCanvas(state.srcOriginal, 1024);
+            var work = makeWorkCanvas(state.srcOriginal, 2048);
             var maskCanvas;
             try { maskCanvas = await removeBgIMGLY(work.canvas); }
             catch (e1) { maskCanvas = await removeBgMP(work.canvas); }
@@ -1853,16 +2213,17 @@
         var area = document.getElementById("printArea");
         area.innerHTML = "";
         res.plans.forEach(function (plan) {
-          var cnv = renderSheetCanvas(plan, res.spec);
+          var cnv = renderSheetCanvas(plan);
           var img = document.createElement("img");
           img.alt = "";
           img.src = cnv.toDataURL("image/jpeg", 0.92);
-          img.style.width = res.spec.wmm + "mm";
-          img.style.height = res.spec.hmm + "mm";
+          img.style.width = plan.wmm + "mm";
+          img.style.height = plan.hmm + "mm";
           area.appendChild(img);
         });
+        var first = res.plans[0];
         document.getElementById("pageStyle").textContent =
-          "@page { size: " + res.spec.wmm + "mm " + res.spec.hmm + "mm; margin: 0; }";
+          "@page { size: " + first.wmm + "mm " + first.hmm + "mm; margin: 0; }";
         setTimeout(function () { window.print(); }, 60);
       });
     </script>
