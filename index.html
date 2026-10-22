@@ -40,17 +40,25 @@
       }
       * { box-sizing: border-box; }
       [hidden] { display: none !important; }
-      html { -webkit-text-size-adjust: 100%; }
+      html { -webkit-text-size-adjust: 100%; height: 100%; }
       body {
         margin: 0;
         font-family: "Tajawal", "Segoe UI", Tahoma, Arial, sans-serif;
         background: var(--bg);
         color: var(--ink);
         line-height: 1.55;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
       }
-      .wrap { max-width: 1180px; margin: 0 auto; padding: 16px 14px 48px; }
-      h1 { font-size: 1.45rem; font-weight: 800; margin: 6px 0 2px; }
-      .sub { color: var(--muted); margin: 0 0 18px; font-size: 1rem; }
+      .wrap {
+        flex: 1; min-height: 0; width: 100%; min-width: 0;
+        padding: 10px 14px 12px;
+        display: flex; flex-direction: column;
+      }
+      h1 { font-size: 1.3rem; font-weight: 800; margin: 2px 0 0; }
+      .sub { color: var(--muted); margin: 0 0 10px; font-size: .95rem; }
       .card {
         background: var(--card);
         border: 1px solid var(--line);
@@ -61,10 +69,11 @@
       }
       .card h2 { font-size: 1.15rem; font-weight: 800; margin: 0 0 12px; }
       .card h3 { font-size: 1rem; font-weight: 700; margin: 18px 0 8px; }
-      .card h3:first-of-type { margin-top: 4px; }
+      #emptyState { overflow-y: auto; }
 
       /* ---------- Empty state / steps ---------- */
       .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 18px; }
+      @media (max-width: 860px) { .steps { grid-template-columns: 1fr; } }
       .step {
         background: var(--field); border: 1px solid var(--line); border-radius: 10px;
         padding: 12px; text-align: center; font-weight: 500;
@@ -105,38 +114,50 @@
       .btn.ghost:hover { background: var(--line); }
       .btn:disabled { opacity: .5; cursor: not-allowed; }
       .btn svg { width: 20px; height: 20px; flex: none; }
-
-      /* ---------- Workspace layout ---------- */
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-      @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .steps { grid-template-columns: 1fr; } }
-      .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-      .card-head h2 { margin: 0; }
-      .card-head h2 small { color: var(--muted); font-size: .85rem; font-weight: 500; }
       .mini-btn {
         min-height: 40px; padding: 6px 12px; border-radius: 8px; font-size: .92rem; font-weight: 700;
         background: var(--field); border: 1px solid var(--line); color: var(--ink); cursor: pointer;
       }
       .mini-btn:hover { background: var(--line); }
       .mini-btn.danger { color: var(--danger); }
+      .mini-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-      /* ---------- Batch photo list ---------- */
-      .photo-item {
-        display: flex; gap: 12px; align-items: center;
-        border: 2px solid var(--line); border-radius: 12px;
-        padding: 10px; margin-top: 10px; background: var(--field); cursor: pointer;
+      /* ---------- Three-column workspace (100dvw × 100dvh, internal scroll only) ----------
+         One horizontal strip (RTL: first column on the right) of three
+         vertical columns whose widths are flexible fractions of the window —
+         nothing has a fixed pixel width, so widening the browser stretches
+         every column proportionally. Each column scrolls internally; the
+         page itself never scrolls. On very narrow screens the strip scrolls
+         sideways at the columns' minimum width instead of breaking. */
+      #workspace {
+        flex: 1; min-height: 0; min-width: 0;
+        display: flex; flex-direction: row;
+        overflow-x: auto; overflow-y: hidden;
       }
-      .photo-item.active { border-color: var(--accent); background: var(--accent-soft); }
-      .photo-item canvas {
-        width: 62px; height: auto; border-radius: 6px; flex: none;
-        border: 1px solid var(--line); background: #fff;
+      .col-sec {
+        flex: 1 0 0; min-width: 260px; min-height: 0; overflow-y: auto; overflow-x: hidden;
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        box-shadow: var(--shadow); padding: 12px 16px 16px;
       }
-      .photo-meta { flex: 1; min-width: 0; }
-      .photo-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .photo-tags { color: var(--muted); font-size: .85rem; }
+      .col-sec h2 { font-size: 1.12rem; font-weight: 800; margin: 0 0 10px; }
+      .col-sec h2 small { color: var(--muted); font-size: .85rem; font-weight: 500; }
+      .col-sec h3 { font-size: 1rem; font-weight: 700; margin: 0 0 8px; }
+      .splitter {
+        flex: none; width: 14px; align-self: stretch;
+        display: flex; align-items: center; justify-content: center;
+        cursor: col-resize; touch-action: none; user-select: none; -webkit-user-select: none;
+      }
+      .splitter .grip { width: 5px; height: 72px; border-radius: 3px; background: var(--line); transition: background .15s ease; }
+      .splitter:hover .grip, .splitter.dragging .grip { background: var(--accent); }
+
+      /* ---------- Settings column groups ---------- */
+      .settings-groups { display: flex; flex-direction: column; gap: 18px; }
+      .sgroup { min-width: 0; }
+      .sgroup .hint { color: var(--muted); font-size: .88rem; margin: 6px 0 0; }
 
       /* ---------- Editor stage ---------- */
       .stage {
-        position: relative; width: 100%; max-width: 430px; margin: 0 auto;
+        position: relative; width: 100%; max-width: 100%; margin: 0 auto;
         border-radius: 8px; overflow: hidden; background: #888;
         touch-action: none; user-select: none; -webkit-user-select: none;
         box-shadow: inset 0 0 0 1px var(--line);
@@ -204,14 +225,55 @@
       @media (prefers-color-scheme: dark) {
         .warn { background: #38300f; border-color: #6b5c1e; color: #f0d48a; }
       }
+      /* ---------- Editor column: smart bar, strip, editor + result ---------- */
+      .smart-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+      .smart-bar .btn { flex: 1 1 230px; min-height: 56px; font-size: 1.08rem; }
+      .smart-desc { color: var(--muted); font-size: .9rem; margin: 8px 0 0; }
+      .smart-status { font-weight: 700; color: var(--accent-dark); margin: 8px 0 0; }
+      .smart-status:empty { margin: 0; }
+      .engine-badge {
+        display: inline-block; margin: 8px 0 0; padding: 6px 12px; border-radius: 999px;
+        background: var(--accent-soft); color: var(--accent-dark);
+        font-weight: 700; font-size: .92rem;
+      }
+      .engine-badge.warn {
+        background: #fdf3e3; border: 1px solid #ecd9ae; color: #6d5510; border-radius: 10px;
+      }
+      @media (prefers-color-scheme: dark) {
+        .engine-badge.warn { background: #38300f; border-color: #6b5c1e; color: #f0d48a; }
+      }
+      .progress { height: 12px; background: var(--field); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin-top: 10px; }
+      .progress-bar { height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .25s ease; }
+      .progress-bar.indet { width: 40% !important; animation: indet 1.1s ease-in-out infinite alternate; }
+      @keyframes indet { from { margin-inline-start: 0; } to { margin-inline-start: 60%; } }
+      @media (prefers-reduced-motion: reduce) { .progress-bar.indet { animation: none; width: 100% !important; } }
+      .progress-text { font-size: .92rem; color: var(--muted); margin: 6px 0 0; font-weight: 500; }
 
-      /* ---------- Two-column workspace (controls / live result) ---------- */
-      .workspace-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 16px; align-items: start; }
-      @media (max-width: 960px) { .workspace-grid { grid-template-columns: 1fr; } }
-      @media (min-width: 961px) { .col-result { position: sticky; top: 12px; } }
-      .result-stage { text-align: center; }
-      .result-stage canvas {
-        max-width: min(100%, 360px); height: auto; background: #fff;
+      .strip-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+      .strip-head .t { font-weight: 800; font-size: 1rem; }
+      .strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+      .strip-item {
+        display: flex; flex-direction: column; align-items: center; gap: 3px;
+        width: 108px; padding: 7px 6px; border: 2px solid var(--line); border-radius: 10px;
+        background: var(--field); cursor: pointer;
+      }
+      .strip-item.active { border-color: var(--accent); background: var(--accent-soft); }
+      .strip-item canvas {
+        width: 60px; height: auto; border-radius: 4px; background: #fff;
+        border: 1px solid var(--line);
+      }
+      .strip-item .photo-name {
+        font-weight: 700; font-size: .8rem; max-width: 96px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .strip-item .photo-tags { color: var(--muted); font-size: .72rem; text-align: center; line-height: 1.4; }
+      .strip-item .del-photo { align-self: stretch; min-height: 30px; padding: 2px 6px; font-size: .8rem; }
+
+      .editor-flex { display: flex; flex-direction: column; gap: 16px; margin-top: 14px; }
+      .stage-col { width: 100%; min-width: 0; }
+      .result-col { width: 100%; min-width: 0; text-align: center; }
+      .result-col canvas {
+        width: min(100%, 330px); max-width: 100%; height: auto; background: #fff;
         border: 1px solid var(--line); box-shadow: 0 4px 18px rgba(0,0,0,.18);
       }
 
@@ -246,9 +308,11 @@
       .sheet-label:first-child { margin-top: 0; }
       .sheet-label small { color: var(--muted); font-weight: 500; }
 
-      /* ---------- Sheet ---------- */
-      .seg { display: flex; gap: 8px; flex-wrap: wrap; }
-      .seg .preset { min-width: 0; }
+      /* ---------- Sheets column: group actions + sheets ---------- */
+      .group-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+      .ga { display: flex; gap: 6px; align-items: stretch; flex: 1 1 270px; }
+      .ga .btn { flex: 1; min-height: 54px; }
+      .ga .mini-btn { flex: none; align-self: stretch; min-height: 54px; }
       .sheet-preview {
         margin-top: 12px; background: var(--field); border: 1px solid var(--line);
         border-radius: 10px; padding: 12px; text-align: center;
@@ -273,24 +337,10 @@
       }
       .toast.show { opacity: 1; }
 
-      /* ---------- Smart tools ---------- */
-      .smart-step { padding: 10px 0 4px; }
-      .smart-step + .smart-step { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 14px; }
-      .smart-btn { width: 100%; min-height: 58px; font-size: 1.1rem; }
-      .smart-desc { color: var(--muted); font-size: .93rem; margin: 8px 0 0; }
-      .smart-status { font-weight: 700; color: var(--accent-dark); margin: 8px 0 0; }
-      .smart-status:empty { margin: 0; }
-      .progress { height: 12px; background: var(--field); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin-top: 10px; }
-      .progress-bar { height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .25s ease; }
-      .progress-bar.indet { width: 40% !important; animation: indet 1.1s ease-in-out infinite alternate; }
-      @keyframes indet { from { margin-inline-start: 0; } to { margin-inline-start: 60%; } }
-      @media (prefers-reduced-motion: reduce) { .progress-bar.indet { animation: none; width: 100% !important; } }
-      .progress-text { font-size: .92rem; color: var(--muted); margin: 6px 0 0; font-weight: 500; }
-
       /* ---------- Print ---------- */
       #printArea { display: none; }
       @media print {
-        body { background: #fff; }
+        body { background: #fff; height: auto; overflow: visible; display: block; }
         body > .wrap, body > .toast { display: none !important; }
         #printArea { display: block; }
         #printArea img { display: block; page-break-after: always; }
@@ -324,196 +374,223 @@
         <p class="note">تُعالج الصور داخل متصفحك على جهازك فقط، ولا تُرسل إلى أي خادم.</p>
       </section>
 
-      <!-- ===== Workspace ===== -->
+      <!-- ===== Workspace: three vertical columns, no page scroll ===== -->
       <div id="workspace" hidden>
-      <div class="workspace-grid">
-      <div class="col-main">
-      <section class="card" id="smartCard">
-        <h2>خطوات ذكية تلقائية <small style="color:var(--muted);font-size:.85rem;font-weight:500">(تُطبَّق على الصورة المختارة في الأسفل)</small></h2>
-        <div class="smart-step">
-          <button class="btn smart-btn" id="smartCropBtn" type="button">١ — قصّ ذكي تلقائي</button>
-          <p class="smart-desc">يكشف الوجه، ويسوّي ميلان الرأس من خطّ العينين، ويضبط حجم الرأس وموضع العينين حسب المقاس الرسمي — وبعده يمكنك التحسين يدوياً بالسحب والتكبير في الأسفل.</p>
-          <p class="smart-status" id="smartStatus" role="status"></p>
-        </div>
-        <div class="smart-step">
-          <button class="btn smart-btn" id="bgRemoveBtn" type="button">٢ — إزالة الخلفية وجعلها بيضاء</button>
-          <p class="smart-desc">إزالة حقيقية بالذكاء الاصطناعي داخل متصفحك، ثم تُركَّب صورتك فوق لون الخلفية المختار في الأسفل (الأبيض النقي افتراضياً). أول مرة فقط سيُحمَّل نموذج الذكاء الاصطناعي من الإنترنت، وبعده يعمل بلا إنترنت من ذاكرة المتصفح.</p>
-          <div id="bgProgressWrap" hidden>
-            <div class="progress"><div class="progress-bar" id="bgProgressBar"></div></div>
-            <p class="progress-text" id="bgProgressText"></p>
+
+        <!-- ===== Column 1 (right in RTL): settings ===== -->
+        <section class="col-sec" id="rowSettings">
+          <h2>الإعدادات</h2>
+          <div class="settings-groups">
+
+            <div class="sgroup">
+              <h3>مقاس الصورة</h3>
+              <div class="presets" id="sizePresets">
+                <button class="preset active" type="button" data-w="3.5" data-h="4.5">الهوية الجزائرية<small>3.5 × 4.5 سم</small></button>
+                <button class="preset" type="button" data-w="3.5" data-h="4.5">شنغن<small>3.5 × 4.5 سم</small></button>
+                <button class="preset" type="button" data-w="5" data-h="5">جواز سفر<small>5 × 5 سم</small></button>
+                <button class="preset" type="button" data-w="3.3" data-h="4.8">الصيني<small>3.3 × 4.8 سم</small></button>
+              </div>
+              <div class="size-inputs">
+                <div class="fld">
+                  <label for="sizeW">العرض (سم)</label>
+                  <input type="number" id="sizeW" min="1" max="20" step="0.1" value="3.5" inputmode="decimal" />
+                </div>
+                <div class="fld">
+                  <label for="sizeH">الارتفاع (سم)</label>
+                  <input type="number" id="sizeH" min="1" max="20" step="0.1" value="4.5" inputmode="decimal" />
+                </div>
+              </div>
+            </div>
+
+            <div class="sgroup">
+              <h3>تعديل الصورة</h3>
+              <div class="ctl">
+                <label for="brightRange">السطوع <output id="brightOut">100%</output></label>
+                <input type="range" id="brightRange" min="50" max="150" step="1" value="100" />
+              </div>
+              <div class="ctl">
+                <label for="contrastRange">التباين <output id="contrastOut">100%</output></label>
+                <input type="range" id="contrastRange" min="50" max="150" step="1" value="100" />
+              </div>
+              <div class="ctl">
+                <label for="satRange">تشبّع الألوان <output id="satOut">100%</output></label>
+                <input type="range" id="satRange" min="0" max="200" step="1" value="100" />
+              </div>
+              <div class="ctl">
+                <label for="sharpRange">الحدّة والنقاء <output id="sharpOut">0%</output></label>
+                <input type="range" id="sharpRange" min="0" max="100" step="1" value="0" />
+              </div>
+              <div class="row-btns">
+                <button class="mini-btn" id="resetAdjBtn" type="button">إعادة تعيين التعديلات</button>
+              </div>
+            </div>
+
+            <div class="sgroup">
+              <h3>لون الخلفية</h3>
+              <div class="swatches" id="swatches">
+                <div class="swatch-wrap"><button class="swatch active" type="button" data-color="#ffffff" style="background:#ffffff" aria-label="أبيض"></button><span class="swatch-name">أبيض</span></div>
+                <div class="swatch-wrap"><button class="swatch" type="button" data-color="#f6f2ea" style="background:#f6f2ea" aria-label="أبيض مكسور"></button><span class="swatch-name">أبيض مكسور</span></div>
+                <div class="swatch-wrap"><button class="swatch" type="button" data-color="#d7ecfa" style="background:#d7ecfa" aria-label="أزرق فاتح"></button><span class="swatch-name">أزرق فاتح</span></div>
+                <div class="swatch-wrap"><button class="swatch" type="button" data-color="#4a90d9" style="background:#4a90d9" aria-label="أزرق"></button><span class="swatch-name">أزرق</span></div>
+                <div class="swatch-wrap"><button class="swatch" type="button" data-color="#d9d9d9" style="background:#d9d9d9" aria-label="رمادي فاتح"></button><span class="swatch-name">رمادي فاتح</span></div>
+                <div class="swatch-wrap"><button class="swatch" type="button" data-color="#9a9a9a" style="background:#9a9a9a" aria-label="رمادي"></button><span class="swatch-name">رمادي</span></div>
+              </div>
+              <div class="switch-row">
+                <span class="txt">خلفية موحّدة (تجريبي)<small>خيار أخير عند تعذّر الإزالة الذكية — يستبدل لون خلفية الصورة الحالية باللون المختار أعلاه</small></span>
+                <button class="switch" id="unifySwitch" type="button" aria-pressed="false" aria-label="خلفية موحدة تجريبي"></button>
+              </div>
+              <div id="unifyControls" hidden>
+                <div class="ctl">
+                  <label for="unifyRange">حساسية الاستبدال <output id="unifyOut">85</output></label>
+                  <input type="range" id="unifyRange" min="20" max="200" step="1" value="85" />
+                </div>
+                <div class="warn">ميزة تجريبية: تعمل جيداً عندما تكون خلفية صورتك بلون واحد واضح (حائط أبيض مثلاً). قد لا تكون النتيجة مثالية مع الخلفيات الملوّنة أو المزدحمة.</div>
+              </div>
+            </div>
+
+            <div class="sgroup">
+              <h3>محرك إزالة الخلفية</h3>
+              <p class="hint" style="margin:0">المحرك الوحيد: <strong>BRIA RMBG-2.0 (BiRefNet)</strong> — أقوى نموذج في عائلة BRIA لإزالة الخلفية، يعمل بأقصى جودة (fp32) داخل متصفحك على جهازك. لا يوجد أي محرك بديل أضعف: إن تعذّر تشغيله تظهر رسالة خطأ بدل إنتاج إزالة رديئة. أول مرة فقط يُحمَّل النموذج من الإنترنت (تحميل كبير)، وبعده يعمل من ذاكرة المتصفح.</p>
+            </div>
+
+            <div class="sgroup">
+              <h3>باقة طباعة الصورة النشطة</h3>
+              <div class="pkg-wrap" style="margin-top:2px">
+                <label>الباقة
+                  <select id="activePkgSelect" class="pkg-select" aria-label="باقة طباعة الصورة المختارة"></select>
+                </label>
+                <label id="activeAutoWrap" hidden>مقاس الورقة
+                  <select id="activeAutoSheet" class="pkg-select" aria-label="مقاس الورقة للوضع التلقائي">
+                    <option value="s10x15">10 × 15 سم</option>
+                    <option value="s15x20">15 × 20 سم</option>
+                    <option value="a4">A4</option>
+                  </select>
+                </label>
+                <label>عدد الأوراق
+                  <input type="number" id="activeSheetsInput" class="sheets-input" min="1" max="20" step="1" value="1" aria-label="عدد أوراق الصورة المختارة" />
+                </label>
+              </div>
+              <p class="hint">كل صورة تُطبع وحدها على أوراق باقتها كاملةً — لا تُخلط صورتان على ورقة واحدة أبداً، ومقاس الصورة نفسه (3.5 × 4.5) لا يتغيّر بتغيّر الورقة.</p>
+            </div>
+
+            <div class="sgroup wide">
+              <h3>باقاتي المخصصة — مقاس وتقسيم جديد</h3>
+              <p class="hint" style="margin:0">أضف مقاس ورقة وتقسيماً جديداً (مثلاً ورقة 13×18 تُقسَّم 3 أعمدة × 3 صفوف = 9 صور) وستظهر الباقة في قائمة باقات كل صورة، وتبقى محفوظة في هذا المتصفح.</p>
+              <div class="pkg-form">
+                <div class="fld full"><label for="cpName">اسم الباقة (اختياري)</label><input type="text" id="cpName" placeholder="مثال: ورقة 13×18 — 9 صور" /></div>
+                <div class="fld"><label for="cpW">عرض الورقة (سم)</label><input type="number" id="cpW" min="5" max="60" step="0.5" value="13" inputmode="decimal" /></div>
+                <div class="fld"><label for="cpH">ارتفاع الورقة (سم)</label><input type="number" id="cpH" min="5" max="60" step="0.5" value="18" inputmode="decimal" /></div>
+                <div class="fld"><label for="cpCols">عدد الأعمدة</label><input type="number" id="cpCols" min="1" max="10" step="1" value="3" /></div>
+                <div class="fld"><label for="cpRows">عدد الصفوف</label><input type="number" id="cpRows" min="1" max="10" step="1" value="3" /></div>
+              </div>
+              <div class="row-btns"><button class="mini-btn" id="addPkgBtn" type="button">＋ إضافة مقاس وتقسيم جديد</button></div>
+              <div id="customPkgList"></div>
+            </div>
+
+            <div class="sgroup">
+              <h3>الطباعة وتقسيم الأعمدة</h3>
+              <div class="switch-row">
+                <span class="txt">خطوط قصّ حول كل صورة<small>حدود متقطعة حول كل صورة على حدة</small></span>
+                <button class="switch" id="cutSwitch" type="button" aria-pressed="true" aria-label="خطوط القص"></button>
+              </div>
+              <div class="switch-row">
+                <span class="txt">خطوط قصّ ممتدة حتى حواف الورقة<small>خطوط رفيعة تمتد من حواف كل صورة حتى حافتي الورقة، لتسهيل القصّ بالمقص أو القاطع</small></span>
+                <button class="switch" id="cutExtendSwitch" type="button" aria-pressed="true" aria-label="خطوط قص ممتدة حتى الحواف"></button>
+              </div>
+              <div class="row-btns">
+                <button class="mini-btn" id="layoutResetBtn" type="button">إعادة ضبط الأعمدة</button>
+              </div>
+              <p class="hint">يمكنك أيضاً سحب الشريط الفاصل بين أي عمودين لتغيير عرضيهما، أو النقر عليه مرتين لإعادة التوزيع الثلثي المتساوي — ويتذكّر البرنامج تقسيمك في المرات القادمة.</p>
+            </div>
+
           </div>
+        </section>
+
+        <div class="splitter" id="split1" role="separator" aria-orientation="vertical" aria-label="تغيير عرض عمود الإعدادات وعمود الصورة" title="اسحب لتغيير العرض — نقرة مزدوجة لإعادة التوزيع الثلثي"><span class="grip"></span></div>
+
+        <!-- ===== Column 2 (middle): the photo being edited ===== -->
+        <section class="col-sec" id="rowEditor">
+          <h2>الصورة قيد التعديل <small id="activePhotoName"></small></h2>
+          <div class="smart-bar">
+            <button class="btn" id="smartCropBtn" type="button">قصّ ذكي تلقائي</button>
+            <button class="btn" id="bgRemoveBtn" type="button">إزالة الخلفية وجعلها بيضاء</button>
+          </div>
+          <p class="smart-desc">القصّ الذكي يكشف الوجه ويسوّي ميلان الرأس ويضبط القصّ على المقاس الرسمي. إزالة الخلفية تتم بمحرك RMBG-2.0 — الأقوى جودة — داخل متصفحك، ثم تُركَّب صورتك فوق لون الخلفية المختار في عمود الإعدادات (الأبيض النقي افتراضياً).</p>
           <div class="row-btns">
             <button class="mini-btn" id="bgToggleBtn" type="button" hidden>عرض الأصل للمقارنة</button>
             <button class="mini-btn" id="bgUndoBtn" type="button" hidden>التراجع — إعادة الصورة الأصلية</button>
           </div>
-        </div>
-        <p class="note" style="text-align:start">٣ — بعد الضبط، حمّل الصور أو أوراق الطباعة من قسم التحميل بالأسفل. كل المعالجة تتم على جهازك فقط، ولا تُرسل صورك إلى أي خادم.</p>
-      </section>
-
-      <!-- ===== Batch photo list ===== -->
-      <section class="card" id="batchCard">
-        <div class="card-head">
-          <h2>صور الدفعة (<span id="photoCount">0</span>)</h2>
-          <button class="mini-btn" id="addPhotosBtn" type="button">إضافة صور</button>
-        </div>
-        <p class="stage-hint" style="text-align:start;margin:0">كل صورة أسفل الأخرى، ولكل واحدة ضبطها الخاص المستقل وباقة طباعتها الخاصة بها. اضغط على أي صورة لتصبح هي المعروضة في محرر الضبط، واختر باقتها الجاهزة (8 صور على ورقة 10×15 أو 12 صورة على ورقة 15×20 أو تلقائي أو باقة مخصصة) — تعديلاتك محفوظة لكل صورة عند التنقل بينها.</p>
-        <div id="photoList"></div>
-      </section>
-
-        <!-- Editor column -->
-        <section class="card">
-          <div class="card-head">
-            <h2>١ — اضبط الصورة <small id="activePhotoName"></small></h2>
-            <button class="mini-btn" id="changePhotoBtn" type="button">إضافة صور</button>
+          <p class="smart-status" id="smartStatus" role="status"></p>
+          <p class="engine-badge" id="engineBadge" hidden></p>
+          <div id="bgProgressWrap" hidden>
+            <div class="progress"><div class="progress-bar" id="bgProgressBar"></div></div>
+            <p class="progress-text" id="bgProgressText"></p>
           </div>
 
-          <div class="stage" id="stage">
-            <canvas id="editor" width="720" height="926"></canvas>
-            <svg class="guides" id="guidesSvg" viewBox="0 0 350 450" preserveAspectRatio="none" aria-hidden="true">
-              <ellipse cx="175" cy="205" rx="102" ry="138" fill="none" stroke="#ffcf3f" stroke-width="2.5" stroke-dasharray="10 7"/>
-              <line x1="0" y1="52" x2="350" y2="52" stroke="#ffcf3f" stroke-width="2" stroke-dasharray="8 6"/>
-              <line x1="0" y1="212" x2="350" y2="212" stroke="#39c2ff" stroke-width="2" stroke-dasharray="8 6"/>
-              <line x1="0" y1="352" x2="350" y2="352" stroke="#7dff8a" stroke-width="2" stroke-dasharray="8 6"/>
-              <line x1="175" y1="0" x2="175" y2="450" stroke="#ffffff" stroke-width="1.4" stroke-dasharray="5 7" opacity=".65"/>
-            </svg>
+          <div class="strip-head">
+            <span class="t">صور الدفعة (<span id="photoCount">0</span>)</span>
+            <button class="mini-btn" id="addPhotosBtn" type="button">إضافة صور</button>
           </div>
-          <p class="stage-hint">اسحب الصورة بيدك لتحريكها، وطابق وجهك مع البيضاوي الأصفر: أعلى الرأس مع الخط الأصفر، والعينان مع الخط الأزرق، والذقن مع الخط الأخضر.</p>
+          <p class="stage-hint" style="text-align:start;margin:4px 0 0">اضغط على أي صورة لتصبح هي قيد التعديل — لكل صورة ضبطها الخاص المستقل وباقتها الخاصة، وتعديلاتك محفوظة عند التنقل بينها.</p>
+          <div class="strip" id="photoList"></div>
 
-          <div class="ctl">
-            <label for="zoomRange">التكبير <output id="zoomOut">100%</output></label>
-            <input type="range" id="zoomRange" min="100" max="350" step="1" value="100" />
-          </div>
-          <div class="row-btns">
-            <button class="mini-btn" id="rotateCcwBtn" type="button">⟲ تدوير لليسار</button>
-            <button class="mini-btn" id="rotateCwBtn" type="button">⟳ تدوير لليمين</button>
-            <button class="mini-btn" id="resetCropBtn" type="button">إعادة ضبط القصّ</button>
-          </div>
-          <div class="switch-row">
-            <span class="txt">خطوط إرشاد الوجه<small>تساعدك على ضبط الرأس والعينين والذقن</small></span>
-            <button class="switch" id="guidesSwitch" type="button" aria-pressed="true" aria-label="خطوط إرشاد الوجه"></button>
-          </div>
-
-          <h3>مقاس الصورة</h3>
-          <div class="presets" id="sizePresets">
-            <button class="preset active" type="button" data-w="3.5" data-h="4.5">الهوية الجزائرية<small>3.5 × 4.5 سم</small></button>
-            <button class="preset" type="button" data-w="3.5" data-h="4.5">شنغن<small>3.5 × 4.5 سم</small></button>
-            <button class="preset" type="button" data-w="5" data-h="5">جواز سفر<small>5 × 5 سم</small></button>
-            <button class="preset" type="button" data-w="3.3" data-h="4.8">الصيني<small>3.3 × 4.8 سم</small></button>
-          </div>
-          <div class="size-inputs">
-            <div class="fld">
-              <label for="sizeW">العرض (سم)</label>
-              <input type="number" id="sizeW" min="1" max="20" step="0.1" value="3.5" inputmode="decimal" />
+          <div class="editor-flex">
+            <div class="stage-col">
+              <div class="stage" id="stage">
+                <canvas id="editor" width="720" height="926"></canvas>
+                <svg class="guides" id="guidesSvg" viewBox="0 0 350 450" preserveAspectRatio="none" aria-hidden="true">
+                  <ellipse cx="175" cy="205" rx="102" ry="138" fill="none" stroke="#ffcf3f" stroke-width="2.5" stroke-dasharray="10 7"/>
+                  <line x1="0" y1="52" x2="350" y2="52" stroke="#ffcf3f" stroke-width="2" stroke-dasharray="8 6"/>
+                  <line x1="0" y1="212" x2="350" y2="212" stroke="#39c2ff" stroke-width="2" stroke-dasharray="8 6"/>
+                  <line x1="0" y1="352" x2="350" y2="352" stroke="#7dff8a" stroke-width="2" stroke-dasharray="8 6"/>
+                  <line x1="175" y1="0" x2="175" y2="450" stroke="#ffffff" stroke-width="1.4" stroke-dasharray="5 7" opacity=".65"/>
+                </svg>
+              </div>
+              <p class="stage-hint">اسحب الصورة بيدك لتحريكها، وطابق وجهك مع البيضاوي الأصفر: أعلى الرأس مع الخط الأصفر، والعينان مع الخط الأزرق، والذقن مع الخط الأخضر.</p>
+              <div class="ctl">
+                <label for="zoomRange">التكبير <output id="zoomOut">100%</output></label>
+                <input type="range" id="zoomRange" min="100" max="350" step="1" value="100" />
+              </div>
+              <div class="row-btns">
+                <button class="mini-btn" id="rotateCcwBtn" type="button">⟲ تدوير لليسار</button>
+                <button class="mini-btn" id="rotateCwBtn" type="button">⟳ تدوير لليمين</button>
+                <button class="mini-btn" id="resetCropBtn" type="button">إعادة ضبط القصّ</button>
+              </div>
+              <div class="switch-row">
+                <span class="txt">خطوط إرشاد الوجه<small>تساعدك على ضبط الرأس والعينين والذقن</small></span>
+                <button class="switch" id="guidesSwitch" type="button" aria-pressed="true" aria-label="خطوط إرشاد الوجه"></button>
+              </div>
             </div>
-            <div class="fld">
-              <label for="sizeH">الارتفاع (سم)</label>
-              <input type="number" id="sizeH" min="1" max="20" step="0.1" value="4.5" inputmode="decimal" />
+
+            <div class="result-col">
+              <h3>النتيجة النهائية <small id="resultName" style="color:var(--muted);font-size:.85rem;font-weight:500"></small></h3>
+              <canvas id="resultCanvas" width="413" height="531"></canvas>
+              <p class="sheet-info" id="resultInfo">—</p>
+              <p class="stage-hint">هذه هي الصورة الفردية النهائية التي ستُقسَّم على الورقة — تتحدّث مباشرة مع كل تعديل.</p>
             </div>
           </div>
+        </section>
 
-          <h3>تعديل الصورة</h3>
-          <div class="ctl">
-            <label for="brightRange">السطوع <output id="brightOut">100%</output></label>
-            <input type="range" id="brightRange" min="50" max="150" step="1" value="100" />
-          </div>
-          <div class="ctl">
-            <label for="contrastRange">التباين <output id="contrastOut">100%</output></label>
-            <input type="range" id="contrastRange" min="50" max="150" step="1" value="100" />
-          </div>
-          <div class="ctl">
-            <label for="satRange">تشبّع الألوان <output id="satOut">100%</output></label>
-            <input type="range" id="satRange" min="0" max="200" step="1" value="100" />
-          </div>
-          <div class="ctl">
-            <label for="sharpRange">الحدّة والنقاء <output id="sharpOut">0%</output></label>
-            <input type="range" id="sharpRange" min="0" max="100" step="1" value="0" />
-          </div>
-          <p class="stage-hint" style="text-align:start">تُطبَّق الحدّة عند التحميل للحصول على أفضل جودة طباعة.</p>
-          <div class="row-btns">
-            <button class="mini-btn" id="resetAdjBtn" type="button">إعادة تعيين التعديلات</button>
-          </div>
+        <div class="splitter" id="split2" role="separator" aria-orientation="vertical" aria-label="تغيير عرض عمود الصورة وعمود الصور المقسمة" title="اسحب لتغيير العرض — نقرة مزدوجة لإعادة التوزيع الثلثي"><span class="grip"></span></div>
 
-          <h3>لون الخلفية</h3>
-          <div class="swatches" id="swatches">
-            <div class="swatch-wrap"><button class="swatch active" type="button" data-color="#ffffff" style="background:#ffffff" aria-label="أبيض"></button><span class="swatch-name">أبيض</span></div>
-            <div class="swatch-wrap"><button class="swatch" type="button" data-color="#f6f2ea" style="background:#f6f2ea" aria-label="أبيض مكسور"></button><span class="swatch-name">أبيض مكسور</span></div>
-            <div class="swatch-wrap"><button class="swatch" type="button" data-color="#d7ecfa" style="background:#d7ecfa" aria-label="أزرق فاتح"></button><span class="swatch-name">أزرق فاتح</span></div>
-            <div class="swatch-wrap"><button class="swatch" type="button" data-color="#4a90d9" style="background:#4a90d9" aria-label="أزرق"></button><span class="swatch-name">أزرق</span></div>
-            <div class="swatch-wrap"><button class="swatch" type="button" data-color="#d9d9d9" style="background:#d9d9d9" aria-label="رمادي فاتح"></button><span class="swatch-name">رمادي فاتح</span></div>
-            <div class="swatch-wrap"><button class="swatch" type="button" data-color="#9a9a9a" style="background:#9a9a9a" aria-label="رمادي"></button><span class="swatch-name">رمادي</span></div>
-          </div>
-          <p class="stage-hint" style="text-align:start">يُستعمل هذا اللون خلفيةً لورقة الطباعة، ولتغيير خلفية الصورة نفسها فعّل الخيار التالي.</p>
-          <div class="switch-row">
-            <span class="txt">خلفية موحّدة (تجريبي)<small>يستبدل لون خلفية الصورة الحالية باللون المختار أعلاه — خيار أخير عند تعذّر الإزالة الذكية بالذكاء الاصطناعي</small></span>
-            <button class="switch" id="unifySwitch" type="button" aria-pressed="false" aria-label="خلفية موحدة تجريبي"></button>
-          </div>
-          <div id="unifyControls" hidden>
-            <div class="ctl">
-              <label for="unifyRange">حساسية الاستبدال <output id="unifyOut">85</output></label>
-              <input type="range" id="unifyRange" min="20" max="200" step="1" value="85" />
+        <!-- ===== Column 3 (left in RTL): divided sheets & printing ===== -->
+        <section class="col-sec" id="rowSheets">
+          <h2>الصور المقسّمة والطباعة</h2>
+          <div class="group-actions">
+            <div class="ga">
+              <button class="btn" id="grp8Btn" type="button">تحميل كل صور 8 (10×15)<span id="grp8Count"></span></button>
+              <button class="mini-btn" id="grp8PrintBtn" type="button">طباعة صور 8</button>
             </div>
-            <div class="warn">ميزة تجريبية: تعمل جيداً عندما تكون خلفية صورتك بلون واحد واضح (حائط أبيض مثلاً). قد لا تكون النتيجة مثالية مع الخلفيات الملوّنة أو المزدحمة.</div>
+            <div class="ga">
+              <button class="btn" id="grp12Btn" type="button">تحميل كل صور 12 (15×20)<span id="grp12Count"></span></button>
+              <button class="mini-btn" id="grp12PrintBtn" type="button">طباعة صور 12</button>
+            </div>
+            <div class="ga">
+              <button class="btn secondary" id="dlAllEditedBtn" type="button">تحميل كل الصور المعدّلة</button>
+            </div>
           </div>
+          <p class="stage-hint" style="text-align:start;margin:0">مجموعتا 8 و12 منفصلتان تماماً: كل زر يجمع أوراق صور باقته فقط في PDF واحد بمقاس ورقته، حتى لا تختلط المقاسات في مهمة طباعة واحدة. وكل الملفات تُسمّى بالتاريخ والوقت حتى لا تختلط بين تصدير وآخر.</p>
 
-          <h3>باقة طباعة هذه الصورة</h3>
-          <div class="pkg-wrap" style="margin-top:2px">
-            <label>الباقة
-              <select id="activePkgSelect" class="pkg-select" aria-label="باقة طباعة الصورة المختارة"></select>
-            </label>
-            <label id="activeAutoWrap" hidden>مقاس الورقة
-              <select id="activeAutoSheet" class="pkg-select" aria-label="مقاس الورقة للوضع التلقائي">
-                <option value="s10x15">10 × 15 سم</option>
-                <option value="s15x20">15 × 20 سم</option>
-                <option value="a4">A4</option>
-              </select>
-            </label>
-            <label>عدد الأوراق
-              <input type="number" id="activeSheetsInput" class="sheets-input" min="1" max="20" step="1" value="1" aria-label="عدد أوراق الصورة المختارة" />
-            </label>
-          </div>
-          <p class="stage-hint" style="text-align:start">كل صورة تُطبع وحدها على أوراق باقتها كاملةً — لا تُخلط صورتان على ورقة واحدة أبداً، ومقاس الصورة نفسه (3.5 × 4.5) لا يتغيّر بتغيّر الورقة.</p>
-        </section>
-
-        <!-- Print settings -->
-        <section class="card">
-          <h2>إعدادات الطباعة</h2>
-          <div class="switch-row">
-            <span class="txt">خطوط قصّ حول كل صورة<small>حدود متقطعة حول كل صورة على حدة</small></span>
-            <button class="switch" id="cutSwitch" type="button" aria-pressed="true" aria-label="خطوط القص"></button>
-          </div>
-          <div class="switch-row">
-            <span class="txt">خطوط قصّ ممتدة حتى حواف الورقة<small>خطوط رفيعة تمتد من حواف كل صورة حتى حافتي الورقة، لتسهيل القصّ بالمقص أو القاطع</small></span>
-            <button class="switch" id="cutExtendSwitch" type="button" aria-pressed="true" aria-label="خطوط قص ممتدة حتى الحواف"></button>
-          </div>
-
-          <h3>باقاتي المخصصة — مقاس وتقسيم جديد</h3>
-          <p class="stage-hint" style="text-align:start;margin:0">أضف مقاس ورقة وتقسيماً جديداً (مثلاً ورقة 13×18 تُقسَّم 3 أعمدة × 3 صفوف = 9 صور) وستظهر الباقة في قائمة باقات كل صورة، وتبقى محفوظة في هذا المتصفح لاستعمالها في أي وقت لاحقاً.</p>
-          <div class="pkg-form">
-            <div class="fld full"><label for="cpName">اسم الباقة (اختياري)</label><input type="text" id="cpName" placeholder="مثال: ورقة 13×18 — 9 صور" /></div>
-            <div class="fld"><label for="cpW">عرض الورقة (سم)</label><input type="number" id="cpW" min="5" max="60" step="0.5" value="13" inputmode="decimal" /></div>
-            <div class="fld"><label for="cpH">ارتفاع الورقة (سم)</label><input type="number" id="cpH" min="5" max="60" step="0.5" value="18" inputmode="decimal" /></div>
-            <div class="fld"><label for="cpCols">عدد الأعمدة</label><input type="number" id="cpCols" min="1" max="10" step="1" value="3" /></div>
-            <div class="fld"><label for="cpRows">عدد الصفوف</label><input type="number" id="cpRows" min="1" max="10" step="1" value="3" /></div>
-          </div>
-          <div class="row-btns"><button class="mini-btn" id="addPkgBtn" type="button">＋ إضافة مقاس وتقسيم جديد</button></div>
-          <div id="customPkgList"></div>
-        </section>
-      </div>
-
-      <div class="col-result">
-        <!-- Result column: the finished single photo, live -->
-        <section class="card">
-          <h2>٢ — النتيجة النهائية <small id="resultName" style="color:var(--muted);font-size:.85rem;font-weight:500"></small></h2>
-          <div class="result-stage">
-            <canvas id="resultCanvas" width="413" height="531"></canvas>
-            <p class="sheet-info" id="resultInfo">—</p>
-          </div>
-          <p class="stage-hint">هذه هي الصورة الفردية النهائية التي ستُقسَّم على الورقة — تتحدّث مباشرة مع كل تعديل تجريه في عمود الإعدادات.</p>
-        </section>
-
-        <!-- Sheets column -->
-        <section class="card">
-          <h2>٣ — أوراق الطباعة والتحميل</h2>
           <div class="sheet-preview">
             <div id="sheetsPreview"></div>
             <p class="sheet-info" id="sheetInfo">—</p>
@@ -530,17 +607,15 @@
             </button>
             <button class="btn" id="dlPdfBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h8L19 7.5v14H6z"/><path d="M14 2.5v5H19"/><path d="M12 11v6m0 0l-2.2-2.2M12 17l2.2-2.2"/></svg>
-              تحميل الأوراق PDF واحد
+              تحميل كل الأوراق PDF واحد
             </button>
             <button class="btn secondary" id="printBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V3h10v5"/><rect x="4" y="8" width="16" height="8" rx="1.5"/><path d="M7 13h10v8H7z"/></svg>
-              طباعة الأوراق
+              طباعة كل الأوراق
             </button>
           </div>
-          <p class="note" style="text-align:start">نصيحة للطباعة: ملف PDF يحمل كل ورقة بمقاسها الحقيقي الخاص بها — اختر في الطابعة «المقاس الحقيقي 100%» وبدّل مقاس الورقة في الدرج حسب كل صفحة حتى تخرج الصور بمقاسها الصحيح بالضبط.</p>
+          <p class="note" style="text-align:start">نصيحة للطباعة: ملف PDF يحمل كل ورقة بمقاسها الحقيقي الخاص بها — اختر في الطابعة «المقاس الحقيقي 100%» وبدّل مقاس الورقة في الدرج حسب كل صفحة حتى تخرج الصور بمقاسها الصحيح بالضبط. تُطبَّق الحدّة عند التحميل للحصول على أفضل جودة طباعة.</p>
         </section>
-      </div>
-      </div>
       </div>
     </div>
 
@@ -554,6 +629,19 @@
       var PX_PER_CM = 300 / 2.54; // 300 DPI
       function cmPx(cm) { return Math.round(cm * PX_PER_CM); }
       function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+
+      /* ================= Pure timestamp naming (DOM-free) =================
+         Every exported file is named with the local date+time of the export
+         moment: YYYY-MM-DD_HH-mm-ss followed by a type tag and a sequence
+         number, so files from different exports never mix up. */
+      /* PURE-STAMP-BEGIN */
+      function pad2(n) { return (n < 10 ? "0" : "") + n; }
+      function formatStamp(d) {
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) +
+          "_" + pad2(d.getHours()) + "-" + pad2(d.getMinutes()) + "-" + pad2(d.getSeconds());
+      }
+      function stampNow() { return formatStamp(new Date()); }
+      /* PURE-STAMP-END */
 
       /* ================= Pure mask-orientation logic (DOM-free) =================
          In an ID photo the person stands in the center and the four corners are
@@ -705,6 +793,7 @@
           rotBaseOrig: null, srcOrigRot: null,
           rotBaseCut: null, srcCutRot: null,
           cutout: null, bgRemoved: false, previewOrig: false,
+          engineUsed: null,
           zoom: 1, ox: 0, oy: 0,
           photoW: 3.5, photoH: 4.5,
           bright: 100, contrast: 100, sat: 100, sharp: 0,
@@ -732,6 +821,14 @@
       function activePhoto() {
         for (var i = 0; i < photos.length; i++) if (photos[i].id === activeId) return photos[i];
         return null;
+      }
+      function photoById(id) {
+        for (var i = 0; i < photos.length; i++) if (photos[i].id === id) return photos[i];
+        return null;
+      }
+      function photoIndex(ph) {
+        for (var i = 0; i < photos.length; i++) if (photos[i].id === ph.id) return i;
+        return -1;
       }
       /* ================= Print packages =================
          Every photo owns ONE package: a fixed sheet size + grid. Ready-made
@@ -799,6 +896,15 @@
         sel.value = value;
         if (sel.value !== value) sel.value = "p8";
       }
+      /* File-name type tag for a photo's sheets, per the naming scheme:
+         sheet8 / sheet12 / sheet-auto / sheet-custom. */
+      function sheetTypeKey(ph) {
+        if (!ph) return "sheet";
+        if (ph.pkg === "p8") return "sheet8";
+        if (ph.pkg === "p12") return "sheet12";
+        if (ph.pkg === "auto") return "sheet-auto";
+        return "sheet-custom";
+      }
 
       /* ================= Image loading (multi) ================= */
       var fileInput = document.getElementById("fileInput");
@@ -823,16 +929,9 @@
         if (fileInput.files && fileInput.files.length) addFiles(fileInput.files);
         fileInput.value = "";
       });
-      document.getElementById("changePhotoBtn").addEventListener("click", function () { fileInput.click(); });
       document.getElementById("addPhotosBtn").addEventListener("click", function () { fileInput.click(); });
-      var batchCard = document.getElementById("batchCard");
-      ["dragenter", "dragover"].forEach(function (ev) {
-        batchCard.addEventListener(ev, function (e) { e.preventDefault(); batchCard.classList.add("drag"); });
-      });
-      ["dragleave", "drop"].forEach(function (ev) {
-        batchCard.addEventListener(ev, function (e) { e.preventDefault(); batchCard.classList.remove("drag"); });
-      });
-      batchCard.addEventListener("drop", function (e) {
+      var rowEditorEl = document.getElementById("rowEditor");
+      rowEditorEl.addEventListener("drop", function (e) {
         if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
       });
 
@@ -894,10 +993,9 @@
           updateSheet();
         }
         if (added.length > 1) toast("أُضيفت " + added.length + " صور إلى الدفعة");
-        if (photos.length === added.length) window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
-      /* ================= Batch photo list UI ================= */
+      /* ================= Batch photo strip (editor column) ================= */
       var photoListEl = document.getElementById("photoList");
       function photoTags(ph) {
         var tags = [];
@@ -914,7 +1012,7 @@
         photoListEl.innerHTML = "";
         photos.forEach(function (ph) {
           var item = document.createElement("div");
-          item.className = "photo-item" + (ph.id === activeId ? " active" : "");
+          item.className = "strip-item" + (ph.id === activeId ? " active" : "");
           item.dataset.id = ph.id;
 
           var thumb = document.createElement("canvas");
@@ -922,52 +1020,16 @@
           if (ph.thumb) thumb.getContext("2d").drawImage(ph.thumb, 0, 0, thumb.width, thumb.height);
           item.appendChild(thumb);
 
-          var meta = document.createElement("div");
-          meta.className = "photo-meta";
           var name = document.createElement("div");
           name.className = "photo-name";
           name.textContent = ph.name;
-          meta.appendChild(name);
+          name.title = ph.name;
+          item.appendChild(name);
+
           var tags = document.createElement("div");
           tags.className = "photo-tags";
           tags.textContent = photoTags(ph);
-          meta.appendChild(tags);
-          var cw = document.createElement("div");
-          cw.className = "pkg-wrap";
-          var lab = document.createElement("label");
-          lab.textContent = "باقة الطباعة ";
-          var sel = document.createElement("select");
-          sel.className = "pkg-select"; sel.dataset.photoid = ph.id;
-          sel.setAttribute("aria-label", "باقة طباعة " + ph.name);
-          fillPkgSelect(sel, ph.pkg);
-          lab.appendChild(sel);
-          cw.appendChild(lab);
-          if (ph.pkg === "auto") {
-            var lab2 = document.createElement("label");
-            lab2.textContent = "الورقة ";
-            var asel = document.createElement("select");
-            asel.className = "auto-sheet-select"; asel.dataset.photoid = ph.id;
-            asel.setAttribute("aria-label", "مقاس الورقة للوضع التلقائي");
-            [["s10x15", "10 × 15 سم"], ["s15x20", "15 × 20 سم"], ["a4", "A4"]].forEach(function (o) {
-              var opt = document.createElement("option");
-              opt.value = o[0]; opt.textContent = o[1];
-              asel.appendChild(opt);
-            });
-            asel.value = ph.autoSheet || "s10x15";
-            lab2.appendChild(asel);
-            cw.appendChild(lab2);
-          }
-          var lab3 = document.createElement("label");
-          lab3.textContent = "عدد الأوراق ";
-          var sinp = document.createElement("input");
-          sinp.type = "number"; sinp.min = "1"; sinp.max = "20"; sinp.step = "1";
-          sinp.className = "sheets-input"; sinp.dataset.photoid = ph.id;
-          sinp.value = ph.sheetCount || 1;
-          sinp.setAttribute("aria-label", "عدد أوراق " + ph.name);
-          lab3.appendChild(sinp);
-          cw.appendChild(lab3);
-          meta.appendChild(cw);
-          item.appendChild(meta);
+          item.appendChild(tags);
 
           var del = document.createElement("button");
           del.type = "button";
@@ -978,6 +1040,7 @@
 
           photoListEl.appendChild(item);
         });
+        updateGroupButtons();
       }
       photoListEl.addEventListener("click", function (e) {
         var del = e.target.closest ? e.target.closest(".del-photo") : null;
@@ -986,42 +1049,8 @@
           deletePhoto(parseInt(del.dataset.photoid, 10));
           return;
         }
-        if (e.target.classList && (e.target.classList.contains("sheets-input") ||
-            e.target.classList.contains("pkg-select") ||
-            e.target.classList.contains("auto-sheet-select"))) return;
-        var item = e.target.closest ? e.target.closest(".photo-item") : null;
-        if (item) activatePhoto(parseInt(item.dataset.id, 10), true);
-      });
-      function photoById(id) {
-        for (var i = 0; i < photos.length; i++) if (photos[i].id === id) return photos[i];
-        return null;
-      }
-      photoListEl.addEventListener("input", function (e) {
-        if (!e.target.classList || !e.target.classList.contains("sheets-input")) return;
-        var ph = photoById(parseInt(e.target.dataset.photoid, 10));
-        if (ph) { ph.sheetCount = clamp(parseInt(e.target.value, 10) || 1, 1, 20); scheduleSheet(); }
-      });
-      photoListEl.addEventListener("change", function (e) {
-        if (!e.target.classList) return;
-        var ph = photoById(parseInt(e.target.dataset.photoid, 10));
-        if (!ph) return;
-        if (e.target.classList.contains("pkg-select")) {
-          ph.pkg = e.target.value;
-          renderPhotoList();
-          if (ph.id === activeId) syncPkgControls();
-          updateSheet();
-        } else if (e.target.classList.contains("auto-sheet-select")) {
-          ph.autoSheet = e.target.value;
-          renderPhotoList();
-          if (ph.id === activeId) syncPkgControls();
-          updateSheet();
-        } else if (e.target.classList.contains("sheets-input")) {
-          ph.sheetCount = clamp(parseInt(e.target.value, 10) || 1, 1, 20);
-          e.target.value = ph.sheetCount;
-          renderPhotoList();
-          if (ph.id === activeId) syncPkgControls();
-          updateSheet();
-        }
+        var item = e.target.closest ? e.target.closest(".strip-item") : null;
+        if (item) activatePhoto(parseInt(item.dataset.id, 10));
       });
       function deletePhoto(id) {
         if (smartBusy) { toast("انتظر حتى تنتهي المعالجة الحالية"); return; }
@@ -1036,7 +1065,6 @@
           renderPhotoList();
           document.getElementById("workspace").hidden = true;
           document.getElementById("emptyState").hidden = false;
-          window.scrollTo({ top: 0, behavior: "smooth" });
           return;
         }
         renderPhotoList();
@@ -1090,11 +1118,11 @@
         var ph = activePhoto();
         document.getElementById("activePhotoName").textContent = ph ? "— " + ph.name : "";
         syncPkgControls();
+        updateEngineBadge();
       }
-      function activatePhoto(id, scroll) {
+      function activatePhoto(id) {
         if (smartBusy) { toast("انتظر حتى تنتهي المعالجة الحالية"); return; }
-        var ph = null;
-        photos.forEach(function (p) { if (p.id === id) ph = p; });
+        var ph = photoById(id);
         if (!ph) return;
         activeId = id;
         state = ph.st;
@@ -1102,9 +1130,6 @@
         layoutEditor();
         renderPhotoList();
         updateSheet();
-        if (scroll) {
-          document.getElementById("smartCard").scrollIntoView({ behavior: "smooth", block: "start" });
-        }
       }
 
       /* ================= Rotation & effective source (per photo) ================= */
@@ -1345,7 +1370,7 @@
         drawEditor(); updateSheet();
       });
 
-      /* ================= Background ================= */
+      /* ================= Background color & unify ================= */
       document.querySelectorAll("#swatches .swatch").forEach(function (btn) {
         btn.addEventListener("click", function () {
           if (!state) return;
@@ -1466,20 +1491,33 @@
         if (!tileCache[ph.id]) tileCache[ph.id] = renderPhotoFor(ph.st);
         return tileCache[ph.id];
       }
-      function planSheets() {
-        var items = photos.map(function (ph) {
+      /* Build sheet plans for an arbitrary subset of photos. Each plan keeps a
+         direct reference to its photo (plan.photo) so group exports (all-8 /
+         all-12) can render exactly their own subset and nothing else. */
+      function buildPlans(list) {
+        var items = list.map(function (ph) {
           var def = packageDef(ph);
           return { pw: cmPx(ph.st.photoW), ph: cmPx(ph.st.photoH),
                    W: def.W, H: def.H, wmm: def.wmm, hmm: def.hmm,
                    cols: def.cols, rows: def.rows, sheets: ph.sheetCount || 1 };
         });
-        return { plans: planPackagesPure(items) };
+        var plans = planPackagesPure(items);
+        plans.forEach(function (pl) { pl.photo = list[pl.item]; });
+        return plans;
+      }
+      function planSheets() {
+        return { plans: buildPlans(photos) };
+      }
+      function plansForPackage(pkg) {
+        var list = photos.filter(function (ph) { return ph.pkg === pkg; });
+        if (!list.length) return null;
+        return { list: list, plans: buildPlans(list) };
       }
       function renderSheetCanvas(plan) {
         var c = document.createElement("canvas");
         c.width = plan.W; c.height = plan.H;
         var ctx = c.getContext("2d");
-        var ph = photos[plan.item];
+        var ph = plan.photo || photos[plan.item];
         ctx.fillStyle = ph ? ph.st.bg : "#ffffff";
         ctx.fillRect(0, 0, plan.W, plan.H);
         if (!ph) return c;
@@ -1531,7 +1569,7 @@
         var dw = full.width * s, dh = full.height * s;
         ctx.drawImage(full, (t.width - dw) / 2, (t.height - dh) / 2, dw, dh);
         ph.thumb = t;
-        var items = photoListEl.querySelectorAll(".photo-item");
+        var items = photoListEl.querySelectorAll(".strip-item");
         items.forEach(function (item) {
           if (parseInt(item.dataset.id, 10) === ph.id) {
             var cv = item.querySelector("canvas");
@@ -1562,7 +1600,7 @@
         var MAXP = 8;
         var perPhotoSeen = {};
         plans.slice(0, MAXP).forEach(function (plan) {
-          var ph = photos[plan.item];
+          var ph = plan.photo;
           perPhotoSeen[plan.item] = (perPhotoSeen[plan.item] || 0) + 1;
           var box = document.createElement("div");
           var lab = document.createElement("p");
@@ -1590,6 +1628,7 @@
           total + " نسخة إجمالاً · كل ورقة بمقاس باقتها الحقيقي · الدقة 300 DPI";
         updateResultPreview();
         updateActiveThumb();
+        updateGroupButtons();
       }
       var cutSwitch = document.getElementById("cutSwitch");
       cutSwitch.addEventListener("click", function () {
@@ -1604,7 +1643,7 @@
         updateSheet();
       });
 
-      /* Active photo's package controls (in the editor card) */
+      /* Active photo's package controls (settings column) */
       document.getElementById("activePkgSelect").addEventListener("change", function () {
         var ph = activePhoto();
         if (!ph) return;
@@ -1621,6 +1660,7 @@
         var ph = activePhoto();
         if (!ph) return;
         ph.sheetCount = clamp(parseInt(this.value, 10) || 1, 1, 20);
+        renderPhotoList();
         scheduleSheet();
       });
       document.getElementById("activeSheetsInput").addEventListener("change", function () {
@@ -1722,9 +1762,11 @@
       document.getElementById("dlPhotoBtn").addEventListener("click", function () {
         var btn = this;
         busy(btn, function () {
+          var ph = activePhoto();
+          var n = ph ? photoIndex(ph) + 1 : 1;
           return canvasJpegBytes(renderPhoto(), 0.95).then(function (bytes) {
             saveBlob(new Blob([bytes], { type: "image/jpeg" }),
-              "photo-" + state.photoW + "x" + state.photoH + "cm.jpg");
+              stampNow() + "_photo-" + n + ".jpg");
           });
         });
       });
@@ -1733,12 +1775,16 @@
         busy(btn, async function () {
           tileCache = {};
           var res = planSheets();
+          var stamp = stampNow();
+          var counters = {};
           for (var i = 0; i < res.plans.length; i++) {
             var plan = res.plans[i];
             var cnv = renderSheetCanvas(plan);
             var bytes = await canvasJpegBytes(cnv, 0.92);
-            var name = "sheet-" + (i + 1) + "-" + plan.wmm + "x" + plan.hmm + "mm.jpg";
-            saveBlob(new Blob([bytes], { type: "image/jpeg" }), name);
+            var key = sheetTypeKey(plan.photo);
+            counters[key] = (counters[key] || 0) + 1;
+            saveBlob(new Blob([bytes], { type: "image/jpeg" }),
+              stamp + "_" + key + "-" + counters[key] + ".jpg");
           }
           toast("حُمّلت " + res.plans.length + (res.plans.length === 1 ? " ورقة" : " أوراق"));
         });
@@ -1755,7 +1801,7 @@
             var jpg = await canvasJpegBytes(cnv, 0.92);
             pages.push({ jpg: jpg, w: cnv.width, h: cnv.height, spec: { wmm: plan.wmm, hmm: plan.hmm } });
           }
-          saveBlob(buildPdf(pages), "sheets.pdf");
+          saveBlob(buildPdf(pages), stampNow() + "_allsheets.pdf");
         });
       });
 
@@ -1791,6 +1837,106 @@
         ps("trailer\n<< /Size " + (total + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF");
         return new Blob(chunks, { type: "application/pdf" });
       }
+
+      /* ================= Sheets column group actions =================
+         The 8-group and the 12-group are fully separate print jobs: each one
+         collects ONLY the sheets of photos owning that package, so sheet
+         sizes never mix inside one PDF / one print run. */
+      var grp8Btn = document.getElementById("grp8Btn");
+      var grp12Btn = document.getElementById("grp12Btn");
+      var grp8PrintBtn = document.getElementById("grp8PrintBtn");
+      var grp12PrintBtn = document.getElementById("grp12PrintBtn");
+      var dlAllEditedBtn = document.getElementById("dlAllEditedBtn");
+      function countPkg(pkg) {
+        var n = 0;
+        photos.forEach(function (ph) { if (ph.pkg === pkg) n++; });
+        return n;
+      }
+      function countLabel(n) {
+        if (!n) return " — 0";
+        return " — " + n + (n === 1 ? " صورة" : " صور");
+      }
+      function updateGroupButtons() {
+        var n8 = countPkg("p8"), n12 = countPkg("p12");
+        document.getElementById("grp8Count").textContent = countLabel(n8);
+        document.getElementById("grp12Count").textContent = countLabel(n12);
+        grp8Btn.disabled = !n8;
+        grp8PrintBtn.disabled = !n8;
+        grp12Btn.disabled = !n12;
+        grp12PrintBtn.disabled = !n12;
+        dlAllEditedBtn.disabled = !photos.length;
+      }
+      async function downloadGroupPdf(pkg, suffix, btn) {
+        var g = plansForPackage(pkg);
+        if (!g) { toast("لا توجد صور بهذه الباقة"); return; }
+        var old = btn.innerHTML;
+        btn.disabled = true;
+        try {
+          tileCache = {};
+          var pages = [];
+          for (var i = 0; i < g.plans.length; i++) {
+            var plan = g.plans[i];
+            var cnv = renderSheetCanvas(plan);
+            var jpg = await canvasJpegBytes(cnv, 0.92);
+            pages.push({ jpg: jpg, w: cnv.width, h: cnv.height, spec: { wmm: plan.wmm, hmm: plan.hmm } });
+          }
+          saveBlob(buildPdf(pages), stampNow() + "_" + suffix + ".pdf");
+          toast("حُمّل PDF فيه " + g.plans.length + (g.plans.length === 1 ? " ورقة" : " أوراق") +
+            " لـ " + g.list.length + (g.list.length === 1 ? " صورة" : " صور") + " من هذه الباقة فقط");
+        } catch (e) {
+          toast("حدث خطأ، حاول مرة أخرى");
+        } finally { btn.disabled = false; btn.innerHTML = old; }
+      }
+      grp8Btn.addEventListener("click", function () { downloadGroupPdf("p8", "all8", this); });
+      grp12Btn.addEventListener("click", function () { downloadGroupPdf("p12", "all12", this); });
+      function printPlans(plans) {
+        var area = document.getElementById("printArea");
+        area.innerHTML = "";
+        plans.forEach(function (plan) {
+          var cnv = renderSheetCanvas(plan);
+          var img = document.createElement("img");
+          img.alt = "";
+          img.src = cnv.toDataURL("image/jpeg", 0.92);
+          img.style.width = plan.wmm + "mm";
+          img.style.height = plan.hmm + "mm";
+          area.appendChild(img);
+        });
+        var first = plans[0];
+        document.getElementById("pageStyle").textContent =
+          "@page { size: " + first.wmm + "mm " + first.hmm + "mm; margin: 0; }";
+        setTimeout(function () { window.print(); }, 60);
+      }
+      function printGroup(pkg) {
+        var g = plansForPackage(pkg);
+        if (!g) { toast("لا توجد صور بهذه الباقة"); return; }
+        tileCache = {};
+        printPlans(g.plans);
+      }
+      grp8PrintBtn.addEventListener("click", function () { printGroup("p8"); });
+      grp12PrintBtn.addEventListener("click", function () { printGroup("p12"); });
+      dlAllEditedBtn.addEventListener("click", function () {
+        if (!photos.length) { toast("ارفع صورة أولاً"); return; }
+        var btn = this;
+        var old = btn.innerHTML;
+        btn.disabled = true;
+        (async function () {
+          try {
+            var stamp = stampNow();
+            tileCache = {};
+            for (var i = 0; i < photos.length; i++) {
+              var tile = tileFor(photos[i]);
+              var bytes = await canvasJpegBytes(tile, 0.95);
+              saveBlob(new Blob([bytes], { type: "image/jpeg" }),
+                stamp + "_photo-" + (i + 1) + ".jpg");
+              await new Promise(function (r) { setTimeout(r, 180); });
+            }
+            toast("حُمّلت " + photos.length + (photos.length === 1 ? " صورة معدّلة" : " صور معدّلة"));
+          } catch (e) {
+            toast("حدث خطأ، حاول مرة أخرى");
+          } finally { btn.disabled = false; btn.innerHTML = old; }
+        })();
+      });
+      updateGroupButtons();
 
       /* ================= Smart tools: shared helpers ================= */
       var VISION_ESM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
@@ -1984,7 +2130,17 @@
         })();
       });
 
-      /* ================= AI background removal ================= */
+      /* ================= AI background removal — ONE engine only =================
+         The single removal engine is BRIA RMBG-2.0 (BiRefNet), the strongest
+         model of its family, run at fp32 for maximum quality via
+         Transformers.js. There is deliberately NO weaker fallback engine:
+         if RMBG-2.0 cannot load or run, the user gets a clear error and no
+         removal is produced at all. WebGPU → WASM below is only a change of
+         execution device for the SAME model, never a different engine.
+         The engine returns a canvas whose ALPHA channel is the person mask;
+         buildCutout then runs the full refinement chain (orientation guard
+         → 1px erosion → ≤1px feather → defringe) and composites the
+         FULL-resolution original — the source photo is never downscaled. */
       var bgProgWrap = document.getElementById("bgProgressWrap");
       var bgProgBar = document.getElementById("bgProgressBar");
       var bgProgText = document.getElementById("bgProgressText");
@@ -1996,76 +2152,83 @@
         else { bgProgBar.classList.remove("indet"); bgProgBar.style.width = clamp(pct, 0, 100) + "%"; }
         if (text) bgProgText.textContent = text;
       }
-      async function removeBgIMGLY(workCanvas) {
-        var mod = await import("https://cdn.jsdelivr.net/npm/@imgly/background-removal-js@1/+esm");
-        var removeBackground = mod.removeBackground ||
-          (mod.default && mod.default.removeBackground) || mod.default;
-        if (typeof removeBackground !== "function") throw new Error("imgly export missing");
+
+      /* ---- The one and only engine: BRIA RMBG-2.0 (BiRefNet) ----
+         Loaded through @huggingface/transformers as a 'background-removal'
+         pipeline at dtype fp32 (maximum quality). It is fed the work canvas
+         at up to 2048px and its alpha is then upscaled onto the
+         full-resolution original by buildCutout. The first load is large
+         and happens once; afterwards the browser cache serves the model. */
+      var BG_ENGINE_NAME = "RMBG-2.0";
+      var TRANSFORMERS_ESM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/+esm";
+      var transformersPromise = null;
+      var rmbgPipePromise = null;
+      function loadTransformers() {
+        if (!transformersPromise) transformersPromise = import(TRANSFORMERS_ESM);
+        return transformersPromise;
+      }
+      function getRMBGPipeline() {
+        if (!rmbgPipePromise) {
+          rmbgPipePromise = (async function () {
+            var tf = await loadTransformers();
+            if (tf.env) { try { tf.env.allowLocalModels = false; } catch (e) {} }
+            function progressCb(ev) {
+              if (!ev) return;
+              if (ev.status === "progress" && typeof ev.progress === "number") {
+                var p = Math.round(ev.progress);
+                setBgProgress(p, "جارٍ تحميل نموذج RMBG-2.0… " + p + "% (تحميل كبير أول مرة فقط — بعده يعمل من ذاكرة المتصفح)");
+              } else if (ev.status === "initiate" || ev.status === "download") {
+                setBgProgress(null, "جارٍ تحميل نموذج RMBG-2.0… (أول مرة فقط)");
+              }
+            }
+            function opts(device) {
+              return { dtype: "fp32", device: device, progress_callback: progressCb };
+            }
+            var hasGPU = typeof navigator !== "undefined" && "gpu" in navigator;
+            if (hasGPU) {
+              try { return await tf.pipeline("background-removal", "briaai/RMBG-2.0", opts("webgpu")); }
+              catch (e) { /* WebGPU unavailable at runtime — same model on WASM */ }
+            }
+            return await tf.pipeline("background-removal", "briaai/RMBG-2.0", opts("wasm"));
+          })();
+          rmbgPipePromise.catch(function () { rmbgPipePromise = null; });
+        }
+        return rmbgPipePromise;
+      }
+      async function removeBgRMBG2(workCanvas) {
+        setBgProgress(null, "جارٍ تجهيز محرك RMBG-2.0 القوي…");
+        var segmenter = await getRMBGPipeline();
         var blob = await new Promise(function (res) { workCanvas.toBlob(res, "image/png"); });
         if (!blob) throw new Error("toBlob failed");
-        var outBlob = await removeBackground(blob, {
-          publicPath: "https://cdn.jsdelivr.net/npm/@imgly/background-removal-js@1/dist/",
-          model: "isnet",
-          output: { format: "image/png", quality: 1, type: "foreground" },
-          progress: function (key, current, total) {
-            if (total && total > 0 && String(key).indexOf("fetch") === 0) {
-              var p = Math.round(current / total * 100);
-              setBgProgress(p, "جارٍ تحميل نموذج الذكاء الاصطناعي… " + p + "%");
-            }
-          }
-        });
-        setBgProgress(null, "جارٍ تحليل الصورة وإزالة الخلفية…");
-        var bmp = await createImageBitmap(outBlob);
-        var c = document.createElement("canvas");
-        c.width = bmp.width; c.height = bmp.height;
-        c.getContext("2d").drawImage(bmp, 0, 0);
-        return c; // RGBA foreground at work size — its alpha channel is the mask
+        var url = URL.createObjectURL(blob);
+        try {
+          setBgProgress(null, "جارٍ تحليل الصورة بمحرك RMBG-2.0…");
+          var out = await segmenter(url);
+          var img = Array.isArray(out) ? out[0] : out;
+          if (!img || !img.data || !img.width || !img.height) throw new Error("rmbg2 bad output");
+          var w = img.width, h = img.height;
+          if (img.data.length !== w * h * 4) throw new Error("rmbg2 output not RGBA");
+          var c = document.createElement("canvas");
+          c.width = w; c.height = h;
+          var ctx = c.getContext("2d");
+          var idata = ctx.createImageData(w, h);
+          idata.data.set(img.data);
+          ctx.putImageData(idata, 0, 0);
+          return c; // RGBA foreground — its alpha channel is the mask
+        } finally { URL.revokeObjectURL(url); }
       }
-      var segmenterPromise = null;
-      async function removeBgMP(workCanvas) {
-        var vision = await loadVision();
-        if (!segmenterPromise) {
-          segmenterPromise = (async function () {
-            var fileset = await vision.FilesetResolver.forVisionTasks(VISION_WASM);
-            function opts(delegate) {
-              return {
-                baseOptions: {
-                  modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
-                  delegate: delegate
-                },
-                runningMode: "IMAGE",
-                outputCategoryMask: true,
-                outputConfidenceMasks: false
-              };
-            }
-            try { return await vision.ImageSegmenter.createFromOptions(fileset, opts("GPU")); }
-            catch (e) { return await vision.ImageSegmenter.createFromOptions(fileset, opts("CPU")); }
-          })();
-        }
-        var segmenter = await segmenterPromise;
-        setBgProgress(null, "جارٍ تحليل الصورة بنموذج بديل…");
-        var result = segmenter.segment(workCanvas);
-        if (!result || !result.categoryMask) throw new Error("no mask");
-        var mask = result.categoryMask;
-        var mw = mask.width, mh = mask.height;
-        var arr = mask.getAsUint8Array();
-        var c = document.createElement("canvas");
-        c.width = mw; c.height = mh;
-        var ctx = c.getContext("2d");
-        var img = ctx.createImageData(mw, mh);
-        for (var i = 0; i < arr.length; i++) {
-          var o = i * 4;
-          img.data[o] = 255; img.data[o + 1] = 255; img.data[o + 2] = 255;
-          /* Category values are NOT trusted for direction: depending on the
-             model/delegate the person may be category 0 or 1. We write one
-             interpretation here, and buildCutout's corner-vs-center check
-             auto-corrects the alpha if it turns out inverted. */
-          img.data[o + 3] = arr[i] > 0 ? 255 : 0;
-        }
-        ctx.putImageData(img, 0, 0);
-        if (mask.close) mask.close();
-        return c;
+
+      /* Visible badge for the ACTIVE photo: its background was removed by
+         the one and only engine, RMBG-2.0 — there is no other engine that
+         could have produced a cutout. */
+      function updateEngineBadge() {
+        var b = document.getElementById("engineBadge");
+        if (!state || !state.bgRemoved) { b.hidden = true; return; }
+        b.hidden = false;
+        b.className = "engine-badge";
+        b.textContent = "أُزيلت الخلفية بمحرك " + BG_ENGINE_NAME + " (BiRefNet) — المحرك الوحيد";
       }
+
       /* Anti-inversion guard: extract the mask's alpha; in an ID photo the
          corners are background (alpha ~0) and the center is the person
          (alpha ~255). If the corners average HIGHER than the center, the mask
@@ -2087,8 +2250,8 @@
         }
         return maskCanvas;
       }
-      /* Edge refinement step 1 (at the mask's native high resolution, before
-         any resampling): erode the alpha by ~1px to cut the background-colored
+      /* Edge refinement step 1 (at the mask's native resolution, before any
+         resampling): erode the alpha by ~1px to cut the background-colored
          fringe ring that models leave around hair, ears and shoulders. */
       function refineMaskAlpha(maskCanvas) {
         var w = maskCanvas.width, h = maskCanvas.height;
@@ -2155,6 +2318,7 @@
           state.bgRemoved = true; state.previewOrig = false;
           buildSrc(); drawEditor(); updateSheet();
           showBgResultUI();
+          updateEngineBadge();
           setBgProgress(100, "أُعيد تطبيق نتيجة إزالة الخلفية المحفوظة.");
           return;
         }
@@ -2164,9 +2328,8 @@
         (async function () {
           try {
             var work = makeWorkCanvas(state.srcOriginal, 2048);
-            var maskCanvas;
-            try { maskCanvas = await removeBgIMGLY(work.canvas); }
-            catch (e1) { maskCanvas = await removeBgMP(work.canvas); }
+            var maskCanvas = await removeBgRMBG2(work.canvas);
+            state.engineUsed = BG_ENGINE_NAME;
             setBgProgress(96, "جارٍ تركيب النتيجة على الخلفية المختارة…");
             state.cutout = buildCutout(maskCanvas, state.srcOriginal);
             state.bgRemoved = true;
@@ -2180,11 +2343,13 @@
             drawEditor();
             updateSheet();
             showBgResultUI();
-            setBgProgress(100, "تمت إزالة الخلفية بنجاح — صورتك الآن على الخلفية المختارة في الأسفل (الأبيض افتراضياً)، ويمكنك تغيير اللون وستتحدث النتيجة فوراً.");
-            toast("تمت إزالة الخلفية بنجاح");
+            updateEngineBadge();
+            setBgProgress(100, "تمت إزالة الخلفية بنجاح بمحرك " + BG_ENGINE_NAME +
+              " — صورتك الآن على الخلفية المختارة في عمود الإعدادات (الأبيض افتراضياً)، ويمكنك تغيير اللون وستتحدث النتيجة فوراً.");
+            toast("تمت إزالة الخلفية بنجاح — المحرك: " + BG_ENGINE_NAME);
           } catch (e) {
             bgProgWrap.hidden = true;
-            toast("تعذّرت إزالة الخلفية بالذكاء الاصطناعي — تحقق من اتصال الإنترنت أول مرة لتحميل النموذج، أو استعمل خيار «خلفية موحّدة» التجريبي في الأسفل");
+            toast("تعذّر تشغيل محرك الإزالة القوي " + BG_ENGINE_NAME + " — تحقّق من اتصال الإنترنت أول مرة لتحميل النموذج ثم أعد المحاولة. لم تُجرَ أي إزالة بمحرك أضعف.");
           } finally { btn.disabled = false; smartBusy = false; }
         })();
       });
@@ -2196,6 +2361,7 @@
         bgUndoBtn.hidden = true;
         bgToggleBtn.hidden = true;
         bgProgWrap.hidden = true;
+        updateEngineBadge();
         toast("أُعيدت الصورة الأصلية — نتيجة الإزالة محفوظة ويمكن إعادة تطبيقها بزر الإزالة");
       });
       bgToggleBtn.addEventListener("click", function () {
@@ -2205,26 +2371,107 @@
         drawEditor();
       });
 
-      /* ================= Print ================= */
+      /* ================= Column layout: draggable splitters + memory =================
+         The workspace is one horizontal strip (RTL: settings column first,
+         i.e. on the right) of three vertical columns separated by two
+         vertical splitter bars. Column widths are flexible fractions of
+         the window width — no fixed pixel widths — so maximizing the
+         browser stretches every column proportionally. Dragging a splitter
+         redistributes width between its two neighbouring columns (min
+         ~260px each); a double-click restores the equal-thirds split.
+         Widths are stored as fractions in localStorage under a
+         columns-specific key and restored on every open. On very narrow
+         screens the strip scrolls sideways at the minimum widths. */
+      /* PURE-LAYOUT-BEGIN */
+      var LAYOUT_LS_KEY = "dzphotoid.columns.v1";
+      var LAYOUT_DEFAULT = [33.34, 33.33, 33.33];
+      function sanitizeLayoutFracs(f) {
+        if (!Array.isArray(f) || f.length !== 3) return LAYOUT_DEFAULT.slice();
+        var out = [];
+        for (var i = 0; i < 3; i++) {
+          var v = Number(f[i]);
+          if (!isFinite(v) || v <= 0) return LAYOUT_DEFAULT.slice();
+          out.push(v);
+        }
+        var sum = out[0] + out[1] + out[2];
+        return out.map(function (x) { return x / sum * 100; });
+      }
+      function dragLayoutFracs(fracs, idx, deltaFrac, minFrac) {
+        var f = fracs.slice();
+        var a = f[idx], b = f[idx + 1];
+        var d = Math.max(minFrac - a, Math.min(b - minFrac, deltaFrac));
+        f[idx] = a + d;
+        f[idx + 1] = b - d;
+        return f;
+      }
+      /* PURE-LAYOUT-END */
+      var colEls = [document.getElementById("rowSettings"),
+                    document.getElementById("rowEditor"),
+                    document.getElementById("rowSheets")];
+      var layoutFracs = LAYOUT_DEFAULT.slice();
+      try {
+        var rawLayout = localStorage.getItem(LAYOUT_LS_KEY);
+        if (rawLayout) layoutFracs = sanitizeLayoutFracs(JSON.parse(rawLayout));
+      } catch (e) { layoutFracs = LAYOUT_DEFAULT.slice(); }
+      function applyLayout() {
+        colEls.forEach(function (r, i) { if (r) r.style.flexGrow = String(layoutFracs[i]); });
+      }
+      function saveLayout() {
+        try { localStorage.setItem(LAYOUT_LS_KEY, JSON.stringify(layoutFracs)); } catch (e) {}
+      }
+      function resetLayout() {
+        layoutFracs = LAYOUT_DEFAULT.slice();
+        try { localStorage.removeItem(LAYOUT_LS_KEY); } catch (e) {}
+        applyLayout();
+      }
+      function initSplitter(el, idx) {
+        if (!el) return;
+        el.addEventListener("pointerdown", function (e) {
+          e.preventDefault();
+          /* Total width actually occupied by the three columns right now
+             (their flex-grow fractions share exactly this). */
+          var avail = 0;
+          colEls.forEach(function (r) { if (r) avail += r.offsetWidth; });
+          if (avail <= 0) return;
+          var startX = e.clientX;
+          var startFracs = layoutFracs.slice();
+          var minFrac = 260 / avail * 100;
+          el.classList.add("dragging");
+          try { el.setPointerCapture(e.pointerId); } catch (err) {}
+          function mv(ev) {
+            /* RTL: the column pair's first member sits on the RIGHT of the
+               splitter, so moving the pointer LEFT widens it. */
+            var d = (startX - ev.clientX) / avail * 100;
+            layoutFracs = dragLayoutFracs(startFracs, idx, d, minFrac);
+            applyLayout();
+          }
+          function up() {
+            el.classList.remove("dragging");
+            el.removeEventListener("pointermove", mv);
+            saveLayout();
+          }
+          el.addEventListener("pointermove", mv);
+          el.addEventListener("pointerup", up, { once: true });
+          el.addEventListener("pointercancel", up, { once: true });
+        });
+        el.addEventListener("dblclick", function () {
+          resetLayout();
+          toast("أُعيد توزيع الأعمدة إلى الثلث المتساوي");
+        });
+      }
+      initSplitter(document.getElementById("split1"), 0);
+      initSplitter(document.getElementById("split2"), 1);
+      document.getElementById("layoutResetBtn").addEventListener("click", function () {
+        resetLayout();
+        toast("أُعيد ضبط الأعمدة إلى الوضع الافتراضي");
+      });
+      applyLayout();
+
+      /* ================= Print (all sheets) ================= */
       document.getElementById("printBtn").addEventListener("click", function () {
         if (!photos.length || !state) { toast("ارفع صورة أولاً"); return; }
         tileCache = {};
-        var res = planSheets();
-        var area = document.getElementById("printArea");
-        area.innerHTML = "";
-        res.plans.forEach(function (plan) {
-          var cnv = renderSheetCanvas(plan);
-          var img = document.createElement("img");
-          img.alt = "";
-          img.src = cnv.toDataURL("image/jpeg", 0.92);
-          img.style.width = plan.wmm + "mm";
-          img.style.height = plan.hmm + "mm";
-          area.appendChild(img);
-        });
-        var first = res.plans[0];
-        document.getElementById("pageStyle").textContent =
-          "@page { size: " + first.wmm + "mm " + first.hmm + "mm; margin: 0; }";
-        setTimeout(function () { window.print(); }, 60);
+        printPlans(planSheets().plans);
       });
     </script>
   </body>
