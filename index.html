@@ -450,7 +450,8 @@
 
             <div class="sgroup">
               <h3>محرك إزالة الخلفية</h3>
-              <p class="hint" style="margin:0">المحرك الوحيد: <strong>BRIA RMBG-2.0 (BiRefNet)</strong> — أقوى نموذج في عائلة BRIA لإزالة الخلفية، يعمل بأقصى جودة (fp32) داخل متصفحك على جهازك. لا يوجد أي محرك بديل أضعف: إن تعذّر تشغيله تظهر رسالة خطأ بدل إنتاج إزالة رديئة. أول مرة فقط يُحمَّل النموذج من الإنترنت (تحميل كبير)، وبعده يعمل من ذاكرة المتصفح.</p>
+              <p class="hint" style="margin:0">المحرك الوحيد: <strong>BRIA RMBG-1.4</strong> — أقوى نموذج BRIA مفتوح التحميل المباشر، يعمل بأقصى جودة (fp32) داخل متصفحك على جهازك. لا يوجد أي محرك بديل أضعف: إن تعذّر تشغيله تظهر رسالة خطأ بالسبب الحقيقي بدل إنتاج إزالة رديئة. أول مرة فقط يُحمَّل النموذج من الإنترنت (~176 MB) وترى تقدّم التحميل حياً، وبعده يعمل من ذاكرة المتصفح.</p>
+              <p class="hint" style="margin:4px 0 0">ملاحظة: نموذج RMBG-2.0 مقفل من BRIA خلف حساب واستمارة، فلا تستطيع أي صفحة ويب تحميله مباشرة — لهذا نستعمل RMBG-1.4 من نفس العائلة.</p>
             </div>
 
             <div class="sgroup">
@@ -515,7 +516,7 @@
             <button class="btn" id="smartCropBtn" type="button">قصّ ذكي تلقائي</button>
             <button class="btn" id="bgRemoveBtn" type="button">إزالة الخلفية وجعلها بيضاء</button>
           </div>
-          <p class="smart-desc">القصّ الذكي يكشف الوجه ويسوّي ميلان الرأس ويضبط القصّ على المقاس الرسمي. إزالة الخلفية تتم بمحرك RMBG-2.0 — الأقوى جودة — داخل متصفحك، ثم تُركَّب صورتك فوق لون الخلفية المختار في عمود الإعدادات (الأبيض النقي افتراضياً).</p>
+          <p class="smart-desc">القصّ الذكي يكشف الوجه ويسوّي ميلان الرأس ويضبط القصّ على المقاس الرسمي. إزالة الخلفية تتم بمحرك RMBG-1.4 — أقوى نموذج BRIA مفتوح التحميل المباشر — داخل متصفحك، ثم تُركَّب صورتك فوق لون الخلفية المختار في عمود الإعدادات (الأبيض النقي افتراضياً).</p>
           <div class="row-btns">
             <button class="mini-btn" id="bgToggleBtn" type="button" hidden>عرض الأصل للمقارنة</button>
             <button class="mini-btn" id="bgUndoBtn" type="button" hidden>التراجع — إعادة الصورة الأصلية</button>
@@ -2131,12 +2132,18 @@
       });
 
       /* ================= AI background removal — ONE engine only =================
-         The single removal engine is BRIA RMBG-2.0 (BiRefNet), the strongest
-         model of its family, run at fp32 for maximum quality via
-         Transformers.js. There is deliberately NO weaker fallback engine:
-         if RMBG-2.0 cannot load or run, the user gets a clear error and no
-         removal is produced at all. WebGPU → WASM below is only a change of
-         execution device for the SAME model, never a different engine.
+         The single removal engine is BRIA RMBG-1.4, run at fp32 for maximum
+         quality via Transformers.js. (The newer 2.0 successor cannot serve
+         here: BRIA gates it on Hugging Face behind an account and a form, so anonymous
+         downloads are rejected with HTTP 401 before a single model byte
+         arrives — no web page can fetch it directly. RMBG-1.4 is the
+         strongest openly downloadable model of the same BRIA family, and
+         the exact pipeline call below is the pattern proven in published
+         Transformers.js background-removal tools.) There is deliberately
+         NO weaker fallback engine: if RMBG-1.4 cannot load or run, the
+         user gets the REAL error reason and no removal is produced at
+         all. WebGPU → WASM below is only a change of execution device
+         for the SAME model, never a different engine.
          The engine returns a canvas whose ALPHA channel is the person mask;
          buildCutout then runs the full refinement chain (orientation guard
          → 1px erosion → ≤1px feather → defringe) and composites the
@@ -2153,13 +2160,17 @@
         if (text) bgProgText.textContent = text;
       }
 
-      /* ---- The one and only engine: BRIA RMBG-2.0 (BiRefNet) ----
+      /* ---- The one and only engine: BRIA RMBG-1.4 ----
          Loaded through @huggingface/transformers as a 'background-removal'
          pipeline at dtype fp32 (maximum quality). It is fed the work canvas
          at up to 2048px and its alpha is then upscaled onto the
-         full-resolution original by buildCutout. The first load is large
-         and happens once; afterwards the browser cache serves the model. */
-      var BG_ENGINE_NAME = "RMBG-2.0";
+         full-resolution original by buildCutout. The first load (~176 MB)
+         happens once; afterwards the browser cache serves the model.
+         Download progress is shown live (percent + loaded/total MB), and
+         any failure surfaces its real reason — HTTP code, network error —
+         translated to Arabic; never a bare generic message. */
+      var BG_ENGINE_NAME = "RMBG-1.4";
+      var BG_MODEL_ID = "briaai/RMBG-1.4";
       var TRANSFORMERS_ESM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/+esm";
       var transformersPromise = null;
       var rmbgPipePromise = null;
@@ -2167,47 +2178,87 @@
         if (!transformersPromise) transformersPromise = import(TRANSFORMERS_ESM);
         return transformersPromise;
       }
+      /* Format a byte count as MB with at most one decimal (e.g. 80, 176). */
+      function fmtMB(bytes) {
+        if (typeof bytes !== "number" || !isFinite(bytes) || bytes < 0) return "";
+        var mb = bytes / 1048576;
+        return String(mb >= 100 ? Math.round(mb) : Math.round(mb * 10) / 10);
+      }
+      /* Translate a raw load/run failure into an understandable Arabic
+         reason, keeping the original message (and any HTTP code such as
+         401/404) visible — errors are never swallowed into a generic line. */
+      function describeBgError(err) {
+        var msg = "";
+        try { msg = err && err.message ? String(err.message) : String(err == null ? "" : err); } catch (e) { msg = ""; }
+        var low = msg.toLowerCase();
+        var reason = "";
+        if (low.indexOf("401") >= 0 || low.indexOf("unauthorized") >= 0) reason = "رفض خادم النماذج التحميل (خطأ 401 — الملف يتطلب تصريحاً)";
+        else if (low.indexOf("404") >= 0 || low.indexOf("not found") >= 0) reason = "لم يُعثر على ملفات النموذج على الخادم (خطأ 404)";
+        else if (low.indexOf("429") >= 0) reason = "الخادم مشغول بطلبات كثيرة (خطأ 429) — انتظر قليلاً ثم أعد المحاولة";
+        else if (low.indexOf("failed to fetch") >= 0 || low.indexOf("networkerror") >= 0 || low.indexOf("network") >= 0 || low.indexOf("load failed") >= 0) reason = "فشل الاتصال بالشبكة أثناء التحميل — تحقّق من الإنترنت ثم أعد المحاولة";
+        else if (low.indexOf("webgpu") >= 0) reason = "تعذّر تشغيل مسرّع WebGPU في هذا المتصفح";
+        else if (low.indexOf("wasm") >= 0 || low.indexOf("onnx") >= 0 || low.indexOf("runtime") >= 0 || low.indexOf("session") >= 0) reason = "تعذّر تشغيل محرك الاستدلال (ONNX/WASM) داخل المتصفح";
+        else if (low.indexOf("quota") >= 0 || low.indexOf("storage") >= 0) reason = "مساحة تخزين المتصفح ممتلئة — حرّر بعض المساحة ثم أعد المحاولة";
+        if (!msg) msg = "خطأ غير معروف";
+        if (msg.length > 220) msg = msg.slice(0, 220) + "…";
+        return reason ? reason + " — التفاصيل: " + msg : "السبب: " + msg;
+      }
       function getRMBGPipeline() {
         if (!rmbgPipePromise) {
           rmbgPipePromise = (async function () {
+            setBgProgress(null, "جارٍ استيراد مكتبة الذكاء الاصطناعي…");
             var tf = await loadTransformers();
             if (tf.env) { try { tf.env.allowLocalModels = false; } catch (e) {} }
+            setBgProgress(null, "جارٍ تحميل نموذج " + BG_ENGINE_NAME + "… (أول مرة فقط)");
             function progressCb(ev) {
               if (!ev) return;
-              if (ev.status === "progress" && typeof ev.progress === "number") {
-                var p = Math.round(ev.progress);
-                setBgProgress(p, "جارٍ تحميل نموذج RMBG-2.0… " + p + "% (تحميل كبير أول مرة فقط — بعده يعمل من ذاكرة المتصفح)");
+              if (ev.status === "progress") {
+                var mbTxt = "";
+                if (typeof ev.loaded === "number" && typeof ev.total === "number" && ev.total > 0) {
+                  mbTxt = " ‏(" + fmtMB(ev.loaded) + "/" + fmtMB(ev.total) + " MB)";
+                }
+                if (typeof ev.progress === "number") {
+                  var p = Math.round(ev.progress);
+                  setBgProgress(p, "جارٍ تحميل نموذج " + BG_ENGINE_NAME + "… " + p + "%" + mbTxt + " — أول مرة فقط، بعده يعمل من ذاكرة المتصفح");
+                } else if (mbTxt) {
+                  setBgProgress(null, "جارٍ تحميل نموذج " + BG_ENGINE_NAME + "…" + mbTxt + " — أول مرة فقط");
+                }
               } else if (ev.status === "initiate" || ev.status === "download") {
-                setBgProgress(null, "جارٍ تحميل نموذج RMBG-2.0… (أول مرة فقط)");
+                setBgProgress(null, "جارٍ تحميل نموذج " + BG_ENGINE_NAME + "… (أول مرة فقط)");
+              } else if (ev.status === "ready") {
+                setBgProgress(100, "المحرك جاهز — نموذج " + BG_ENGINE_NAME + " حُمّل بالكامل");
               }
             }
             function opts(device) {
               return { dtype: "fp32", device: device, progress_callback: progressCb };
             }
             var hasGPU = typeof navigator !== "undefined" && "gpu" in navigator;
+            var pipe = null;
             if (hasGPU) {
-              try { return await tf.pipeline("background-removal", "briaai/RMBG-2.0", opts("webgpu")); }
-              catch (e) { /* WebGPU unavailable at runtime — same model on WASM */ }
+              try { pipe = await tf.pipeline("background-removal", BG_MODEL_ID, opts("webgpu")); }
+              catch (e) { console.warn("[" + BG_ENGINE_NAME + "] WebGPU path failed — retrying the SAME model on WASM:", e); pipe = null; }
             }
-            return await tf.pipeline("background-removal", "briaai/RMBG-2.0", opts("wasm"));
+            if (!pipe) pipe = await tf.pipeline("background-removal", BG_MODEL_ID, opts("wasm"));
+            setBgProgress(100, "المحرك جاهز — نموذج " + BG_ENGINE_NAME + " يعمل الآن على جهازك");
+            return pipe;
           })();
           rmbgPipePromise.catch(function () { rmbgPipePromise = null; });
         }
         return rmbgPipePromise;
       }
-      async function removeBgRMBG2(workCanvas) {
-        setBgProgress(null, "جارٍ تجهيز محرك RMBG-2.0 القوي…");
+      async function removeBgRMBG(workCanvas) {
+        setBgProgress(null, "جارٍ تجهيز محرك " + BG_ENGINE_NAME + "…");
         var segmenter = await getRMBGPipeline();
         var blob = await new Promise(function (res) { workCanvas.toBlob(res, "image/png"); });
         if (!blob) throw new Error("toBlob failed");
         var url = URL.createObjectURL(blob);
         try {
-          setBgProgress(null, "جارٍ تحليل الصورة بمحرك RMBG-2.0…");
+          setBgProgress(null, "جارٍ تحليل الصورة بمحرك " + BG_ENGINE_NAME + "…");
           var out = await segmenter(url);
           var img = Array.isArray(out) ? out[0] : out;
-          if (!img || !img.data || !img.width || !img.height) throw new Error("rmbg2 bad output");
+          if (!img || !img.data || !img.width || !img.height) throw new Error("rmbg bad output");
           var w = img.width, h = img.height;
-          if (img.data.length !== w * h * 4) throw new Error("rmbg2 output not RGBA");
+          if (img.data.length !== w * h * 4) throw new Error("rmbg output not RGBA");
           var c = document.createElement("canvas");
           c.width = w; c.height = h;
           var ctx = c.getContext("2d");
@@ -2219,14 +2270,14 @@
       }
 
       /* Visible badge for the ACTIVE photo: its background was removed by
-         the one and only engine, RMBG-2.0 — there is no other engine that
+         the one and only engine, RMBG-1.4 — there is no other engine that
          could have produced a cutout. */
       function updateEngineBadge() {
         var b = document.getElementById("engineBadge");
         if (!state || !state.bgRemoved) { b.hidden = true; return; }
         b.hidden = false;
         b.className = "engine-badge";
-        b.textContent = "أُزيلت الخلفية بمحرك " + BG_ENGINE_NAME + " (BiRefNet) — المحرك الوحيد";
+        b.textContent = "أُزيلت الخلفية بمحرك " + BG_ENGINE_NAME + " — المحرك الوحيد";
       }
 
       /* Anti-inversion guard: extract the mask's alpha; in an ID photo the
@@ -2328,7 +2379,7 @@
         (async function () {
           try {
             var work = makeWorkCanvas(state.srcOriginal, 2048);
-            var maskCanvas = await removeBgRMBG2(work.canvas);
+            var maskCanvas = await removeBgRMBG(work.canvas);
             state.engineUsed = BG_ENGINE_NAME;
             setBgProgress(96, "جارٍ تركيب النتيجة على الخلفية المختارة…");
             state.cutout = buildCutout(maskCanvas, state.srcOriginal);
@@ -2348,8 +2399,10 @@
               " — صورتك الآن على الخلفية المختارة في عمود الإعدادات (الأبيض افتراضياً)، ويمكنك تغيير اللون وستتحدث النتيجة فوراً.");
             toast("تمت إزالة الخلفية بنجاح — المحرك: " + BG_ENGINE_NAME);
           } catch (e) {
-            bgProgWrap.hidden = true;
-            toast("تعذّر تشغيل محرك الإزالة القوي " + BG_ENGINE_NAME + " — تحقّق من اتصال الإنترنت أول مرة لتحميل النموذج ثم أعد المحاولة. لم تُجرَ أي إزالة بمحرك أضعف.");
+            console.error("[" + BG_ENGINE_NAME + "] background removal failed:", e);
+            var why = describeBgError(e);
+            setBgProgress(0, "تعذّرت إزالة الخلفية — " + why + ". لم تُجرَ أي إزالة بمحرك آخر، ويمكنك إعادة المحاولة.");
+            toast("تعذّرت إزالة الخلفية — " + why);
           } finally { btn.disabled = false; smartBusy = false; }
         })();
       });

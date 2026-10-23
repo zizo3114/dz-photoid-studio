@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# DZ PhotoID Studio — مشغّل لينكس / ماك
+# DZ PhotoID Studio - local launcher (Linux / macOS)
 cd "$(dirname "$0")"
-PORT=8765
-echo "============================================================"
-echo "  DZ PhotoID Studio — صانع صور الهوية — الجزائر"
-echo "  http://localhost:$PORT"
-echo "  للإيقاف: Ctrl+C"
-echo "============================================================"
-(python3 -c "import webbrowser,time; time.sleep(1.5); webbrowser.open('http://localhost:$PORT')" &)
-python3 -m http.server $PORT --bind 127.0.0.1
+if command -v python3 >/dev/null 2>&1; then
+  python3 serve.py
+elif command -v python >/dev/null 2>&1; then
+  python serve.py
+else
+  echo "Python 3 is not installed. Please install it from https://www.python.org"
+  read -r -p "Press Enter to exit..."
+fi
