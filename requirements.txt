@@ -1,0 +1,10 @@
+numpy<=1.26.4
+onnxruntime>=1.15.0
+opencv-python>=4.8.1.78
+mtcnn-runtime
+requests
+tqdm
+starlette
+pillow
+gradio>=4.43.0
+fastapi

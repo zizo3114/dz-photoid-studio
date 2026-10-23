@@ -1,7 +1,5 @@
-# ملفات مؤقتة
-*.tmp
-*.log
-.DS_Store
-Thumbs.db
-
+.venv/
 __pycache__/
+*.pyc
+outputs/
+*.onnx
