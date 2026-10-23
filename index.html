@@ -1992,9 +1992,11 @@
           faces: dets.map(function (d) {
             var bb = d.boundingBox, kp = d.keypoints || [];
             var inv = 1 / work.scale;
+            var cat = (d.categories && d.categories[0]) || null;
             return {
               x: bb.originX * inv, y: bb.originY * inv,
               w: bb.width * inv, h: bb.height * inv,
+              conf: cat ? (Number(cat.score) || 0) : 0,
               eyeR: kp[0] ? [kp[0].x * base.width, kp[0].y * base.height] : null,
               eyeL: kp[1] ? [kp[1].x * base.width, kp[1].y * base.height] : null
             };
@@ -2028,10 +2030,57 @@
             }
             return {
               x: tl[0], y: tl[1], w: br[0] - tl[0], h: br[1] - tl[1],
+              conf: faceConf(p.probability),
               eyeR: LP(0), eyeL: LP(1)
             };
           })
         };
+      }
+      /* Normalize a detector confidence that may arrive as a plain number,
+         an array, or a Tensor-like object into a single 0..1 number. */
+      function faceConf(v) {
+        if (v == null) return 0;
+        if (typeof v === "object" && typeof v.arraySync === "function") v = v.arraySync();
+        if (Array.isArray(v)) v = v[0];
+        var n = Number(v);
+        return isFinite(n) ? n : 0;
+      }
+      /* STRICT VALIDATION GATE — applied to BOTH detectors' output at this
+         single choke point before any face is chosen or any crop applied.
+         A detection survives only if ALL of these hold:
+           - confidence >= 0.5 (carried on face.conf for display)
+           - BOTH eye points exist and lie inside the face box (±10% tol.)
+           - eye distance is 0.18–0.75 of the box width
+           - eye line sits at 15%–75% of the box height
+           - box is 4%–65% of the image in each dimension
+           - box aspect (w/h) is 0.5–1.6
+         Without this gate a detector can hallucinate a "face" on a skull,
+         the back of a head, or any round shape and the crop that follows
+         is confidently wrong; with it, such images fall through to the
+         honest "no clear face" path and the current crop stays untouched. */
+      function validateFaces(faces, imgW, imgH) {
+        return (faces || []).filter(function (f) {
+          if (!f) return false;
+          if (!(faceConf(f.conf) >= 0.5)) return false;
+          if (!(f.w > 0) || !(f.h > 0)) return false;
+          if (f.h < 0.04 * imgH || f.h > 0.65 * imgH) return false;
+          if (f.w < 0.04 * imgW || f.w > 0.65 * imgW) return false;
+          var ar = f.w / f.h;
+          if (ar < 0.5 || ar > 1.6) return false;
+          if (!f.eyeR || !f.eyeL) return false;
+          var tolX = 0.1 * f.w, tolY = 0.1 * f.h;
+          function inBox(e) {
+            return e[0] >= f.x - tolX && e[0] <= f.x + f.w + tolX &&
+                   e[1] >= f.y - tolY && e[1] <= f.y + f.h + tolY;
+          }
+          if (!inBox(f.eyeR) || !inBox(f.eyeL)) return false;
+          var dEye = Math.hypot(f.eyeL[0] - f.eyeR[0], f.eyeL[1] - f.eyeR[1]);
+          if (dEye < 0.18 * f.w || dEye > 0.75 * f.w) return false;
+          var eyeRelY = ((f.eyeR[1] + f.eyeL[1]) / 2 - f.y) / f.h;
+          if (eyeRelY < 0.15 || eyeRelY > 0.75) return false;
+          f.conf = faceConf(f.conf);
+          return true;
+        });
       }
       function transformPoint(x, y, srcW, srcH, dstW, dstH, deg) {
         var rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
@@ -2054,7 +2103,31 @@
         var left = face.x + face.w / 2 - cropW / 2;
         left = clamp(left, 0, Math.max(0, imgW - cropW));
         top = clamp(top, 0, Math.max(0, imgH - cropH));
-        return { left: left, top: top, w: cropW, h: cropH };
+        /* HEAD-MARGIN GUARD: after clamping, the skull top must never sit
+           above the crop's top edge or closer than 3% of the crop height
+           to it. If shifting the crop up restores the margin, do that; if
+           the shift would push the bottom out of the image, shrink the
+           crop height to fit; only when the skull top is essentially at
+           the image's own top edge is the margin impossible — then the
+           widest possible crop from the top is used and fits=false tells
+           the caller to say so instead of pretending all is well. */
+        var fits = true;
+        var minMargin = 0.03 * cropH;
+        if (headTop - top < minMargin) {
+          var wantTop = headTop - minMargin;
+          if (wantTop >= 0 && wantTop + cropH <= imgH) {
+            top = wantTop;
+          } else if (wantTop >= 0) {
+            cropH = imgH - wantTop;
+            cropW = cropH * aspect;
+            left = clamp(face.x + face.w / 2 - cropW / 2, 0, Math.max(0, imgW - cropW));
+            top = wantTop;
+          } else {
+            top = 0;
+            fits = false;
+          }
+        }
+        return { left: left, top: top, w: cropW, h: cropH, headTop: headTop, fits: fits };
       }
       function applySmartCrop(face) {
         var base = state.rotBaseOrig;
@@ -2084,8 +2157,14 @@
           { x: fx, y: fy, w: fw, h: fh }, eyeY);
         layoutEditor();
         var cs = coverScale();
-        var zoom = (editor.width / rect.w) / cs;
-        zoom = clamp(zoom, 1, 3.5);
+        var rawZoom = (editor.width / rect.w) / cs;
+        var zoom = clamp(rawZoom, 1, 3.5);
+        /* If the zoom had to be clamped, the visible crop is NOT the
+           computed rectangle — never let that mismatch pass silently:
+           fits=false makes the status message admit that the widest
+           possible crop (centered on the face via ox/oy below) was
+           applied instead of the exact computed rectangle. */
+        var fits = rect.fits !== false && rawZoom >= 1 && rawZoom <= 3.5;
         state.zoom = zoom;
         var pct = Math.round(zoom * 100);
         document.getElementById("zoomRange").value = pct;
@@ -2096,7 +2175,10 @@
         clampOffset();
         drawEditor();
         updateSheet();
-        return Math.abs(fine) >= 0.3 ? Math.abs(fine).toFixed(1) : null;
+        return {
+          tilt: Math.abs(fine) >= 0.3 ? Math.abs(fine).toFixed(1) : null,
+          fits: fits
+        };
       }
       document.getElementById("smartCropBtn").addEventListener("click", function () {
         if (!state || !state.srcOriginal) { toast("ارفع صورة أولاً"); return; }
@@ -2110,18 +2192,27 @@
             var result;
             try { result = await detectFaceMP(); }
             catch (e1) { result = await detectFaceBF(); }
-            if (!result.faces.length) {
+            /* Single choke point: BOTH detectors' raw output passes the
+               strict validation gate before anything is chosen. If no
+               detection survives, this is EXACTLY the no-face path —
+               the current crop is left completely untouched. */
+            var base0 = state.rotBaseOrig;
+            var faces = validateFaces(result.faces, base0.width, base0.height);
+            if (!faces.length) {
               setSmartStatus("");
               toast("لم يتم العثور على وجه واضح في الصورة — جرّب صورة أوضح أو اضبط القصّ يدوياً");
               return;
             }
-            var face = result.faces.reduce(function (a, b) {
+            var face = faces.reduce(function (a, b) {
               return (a.w * a.h) >= (b.w * b.h) ? a : b;
             });
-            var tiltTxt = applySmartCrop(face);
-            var msg = "تم القصّ التلقائي — اسحب للتحسين إن أردت";
-            if (tiltTxt) msg += " · تمت تسوية ميلان " + tiltTxt + "°";
-            if (result.faces.length > 1) msg += " · وُجد أكثر من وجه فاخترنا الأكبر";
+            var applied = applySmartCrop(face);
+            var confPct = Math.round(faceConf(face.conf) * 100);
+            var msg = "تم القصّ الذكي التلقائي — ثقة الكشف " + confPct + "%";
+            if (applied.tilt) msg += " · تمت تسوية ميلان " + applied.tilt + "°";
+            if (faces.length > 1) msg += " · وُجد أكثر من وجه فاخترنا الأكبر";
+            if (!applied.fits) msg += " · طُبّق أوسع قصّ ممكن مركّزاً على الوجه لضيق حدود الصورة";
+            msg += " — اسحب للتحسين إن أردت";
             setSmartStatus(msg);
             toast("تم القصّ الذكي التلقائي بنجاح");
           } catch (e) {
