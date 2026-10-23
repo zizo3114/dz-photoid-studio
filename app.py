@@ -30,7 +30,8 @@ import gradio as gr
 from hivision import IDCreator
 from hivision.creator.choose_handler import choose_handler
 from hivision.creator.context import Context, Params
-from hivision.creator.photo_adjuster import adjust_photo
+from hivision.creator.photo_adjuster import adjust_photo, IDphotos_cut, move
+from hivision.creator.utils import get_box, detect_distance
 from hivision.error import FaceError
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +69,14 @@ SHEETS = {
 }
 
 MODES = ["تلقائي — كشف الوجه والقص الذكي", "يدوي — أنا أضبط القص بنفسي"]
+
+# معاملات القص القياسية (قيم المحرك المُختبَرة على 8 بورتريهات: ذقن ≈ 71.6%،
+# عينان ≈ 44.6%، قمة ≈ 10.9% — مطابقة لقوالب صور الهوية المعتمدة)
+CROP_PARAMS = dict(head_measure_ratio=0.20, head_height_ratio=0.45,
+                   head_top_range=(0.12, 0.10))
+# نسب الأدلة القياسية من ارتفاع الصورة (توافق القالب المرجعي 35×45مم):
+# الذقن عند 70% من الأعلى (31.5مم)، العينان عند 44%، القمة المستهدفة 8%
+GUIDE_CROWN, GUIDE_CHIN, GUIDE_EYE = 0.08, 0.70, 0.44
 
 DEFAULT_SETTINGS = {
     "mode": MODES[0],
@@ -317,84 +326,106 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
-def _vlabel(base: Image.Image, text: str, xy, fill):
-    """رسم نص عمودي (مدوّر 90°) على الصورة."""
-    tmp = Image.new("RGBA", (120, 24), (0, 0, 0, 0))
+def _vlabel(base: Image.Image, text: str, xy, fill, size: int = 13):
+    """رسم نص عمودي (مدوّر 90°) على الصورة — بعرض يُقاس حسب النص."""
+    f = _font(size)
+    try:
+        tw = int(f.getlength(text)) + 8
+    except Exception:
+        tw = 8 + len(text) * (size // 2 + 2)
+    tmp = Image.new("RGBA", (tw, size + 10), (0, 0, 0, 0))
     td = ImageDraw.Draw(tmp)
-    td.text((2, 4), text, font=_font(13), fill=fill)
+    td.text((3, 3), text, font=f, fill=fill)
     tmp = tmp.rotate(90, expand=True)
     base.paste(tmp, xy, tmp)
 
 
 def draw_guides(img: Image.Image) -> Image.Image:
     """
-    أدلة قص احترافية على المعاينة فقط — مستوحاة من برامج صور الهوية المعتمدة:
-    بيضوي رأس خارجي (أقصى طول 36مم) وداخلي متقطع (أدنى طول 32مم) بنفس الذقن،
-    شريط منطقة العينين الأزرق الشفاف، خطا عرض الرأس، خط المنتصف،
-    منطقة حمراء فوق قمة الرأس، وقياسات بالمليمتر على اليسار والأسفل.
-    النِّسب من طول الصورة: الذقن 88%، القمة الخارجية 8% (36مم من 45)،
-    القمة الداخلية 16.9% (32مم من 45) — وتتدرج القياسات مع أي مقاس.
+    أدلة قص احترافية على المعاينة فقط — بهوامش قياس خارجية كما في قوالب
+    برامج صور الهوية المعتمدة: أسهم أبعاد خضراء حول الصورة (الارتفاع الكلي،
+    العرض، موضع الذقن من الأعلى مع مجال التسامح، وبعد العينين عن الأسفل)،
+    وعلى الصورة نفسها: منطقة قمة الرأس، بيضوي رأس خارجي/داخلي، شريط العينين،
+    خط المنتصف. النسب القياسية: قمة 8%، ذقن 70%، عينان 44% من الارتفاع —
+    وهي ما ينتجه القص التلقائي فعلياً (قياسات مُتحققة على بورتريهات حقيقية).
     """
-    out = img.copy().convert("RGB")
-    w, h = out.size
-    ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(ov)
-    red = (230, 40, 40)
-    yellow = (250, 200, 0)
-    blue = (60, 130, 220)
-    green = (30, 160, 70)
+    photo = img.copy().convert("RGB")
+    w, h = photo.size
+    total_h_mm = h / DPI * 25.4
+    total_w_mm = w / DPI * 25.4
+    f_big = max(12, int(w * 0.030))
+    f_small = max(10, int(w * 0.024))
 
-    chin_y = h * 0.88
-    crown_out = h * 0.08            # طول رأس 36مم
-    crown_in = chin_y - h * 0.711   # طول رأس 32مم
-    ox0, ox1 = w * 0.19, w * 0.81   # البيضوي الخارجي
-    ix0, ix1 = w * 0.25, w * 0.75   # البيضوي الداخلي
+    mx_l = int(w * 0.16)          # هامش يسار (سهم الارتفاع)
+    mx_r = int(w * 0.46)          # هامش يمين (سهما الذقن والعينين + التسميات)
+    mx_t = int(h * 0.04)
+    mx_b = int(h * 0.12)          # هامش أسفل (سهم العرض)
+    W2, H2 = w + mx_l + mx_r, h + mx_t + mx_b
+    canvas = Image.new("RGB", (W2, H2), (246, 246, 246))
+    canvas.paste(photo, (mx_l, mx_t))
+    d = ImageDraw.Draw(canvas, "RGBA")
+    green = (26, 158, 75)
+    red = (225, 38, 38)
+    blue = (52, 120, 220)
+    yellow = (245, 197, 0)
 
-    # منطقة ممنوعة فوق قمة الرأس (حمراء شفافة بميلان خفيف)
-    d.rectangle([0, 0, w, crown_out], fill=(230, 40, 40, 46))
-    for hx in range(-int(crown_out), w, 14):
-        d.line([(hx, crown_out), (hx + crown_out, 0)], fill=(230, 40, 40, 70), width=1)
-    # شريط منطقة العينين (أزرق شفاف)
-    d.rectangle([0, h * 0.42, w, h * 0.58], fill=(90, 160, 235, 42))
-    # خطا عرض الرأس (أزرق) بطول الصورة
+    crown_y = mx_t + h * GUIDE_CROWN
+    chin_y = mx_t + h * GUIDE_CHIN
+    eye_y = mx_t + h * GUIDE_EYE
+    ox0, ox1 = mx_l + w * 0.23, mx_l + w * 0.77     # البيضوي الخارجي
+    ix0, ix1 = mx_l + w * 0.27, mx_l + w * 0.73     # البيضوي الداخلي
+    crown_in = mx_t + h * 0.13
+
+    # --- على الصورة: المناطق والبيضويات والخطوط ---
+    d.rectangle([mx_l, mx_t, mx_l + w, crown_y], fill=(225, 38, 38, 42))
+    for hx in range(mx_l - int(h * 0.08), mx_l + w, 13):
+        d.line([(hx, crown_y), (hx + (crown_y - mx_t), mx_t)], fill=(225, 38, 38, 66), width=1)
+    d.rectangle([mx_l, mx_t + h * (GUIDE_EYE - 0.04), mx_l + w, mx_t + h * (GUIDE_EYE + 0.04)],
+                fill=(90, 160, 235, 40))
     for x in (ox0, ox1):
-        d.line([(x, 0), (x, h)], fill=blue + (190,), width=1)
-    # البيضوي الخارجي (أحمر مصمت) والداخلي (أحمر متقطع)
-    d.ellipse([ox0, crown_out, ox1, chin_y], outline=red + (255,), width=3)
+        d.line([(x, mx_t), (x, mx_t + h)], fill=blue + (170,), width=1)
+    d.ellipse([ox0, crown_y, ox1, chin_y], outline=red + (255,), width=3)
     steps = 90
     for i in range(steps):
         if i % 2 == 0:
-            a0 = i / steps * 360
-            a1 = (i + 1) / steps * 360
-            d.arc([ix0, crown_in, ix1, chin_y], start=a0, end=a1, fill=red + (230,), width=2)
-    # خط المنتصف (أصفر) وخط العينين
-    d.line([(w / 2, 0), (w / 2, h)], fill=yellow + (255,), width=2)
-    d.line([(0, h * 0.52), (w, h * 0.52)], fill=yellow + (160,), width=1)
-    # مثلث علامة قمة الرأس
-    cx = w / 2
-    d.polygon([(cx - 7, crown_out - 9), (cx + 7, crown_out - 9), (cx, crown_out)],
-              fill=yellow + (255,))
-    out = Image.alpha_composite(out.convert("RGBA"), ov).convert("RGB")
+            d.arc([ix0, crown_in, ix1, chin_y], start=i / steps * 360,
+                  end=(i + 1) / steps * 360, fill=red + (225,), width=2)
+    d.line([(mx_l + w / 2, mx_t), (mx_l + w / 2, mx_t + h)], fill=yellow + (255,), width=2)
+    d.line([(mx_l, eye_y), (mx_l + w, eye_y)], fill=yellow + (170,), width=1)
+    d.line([(mx_l, chin_y), (mx_l + w, chin_y)], fill=green + (200,), width=1)
+    cx = mx_l + w / 2
+    d.polygon([(cx - 7, crown_y - 9), (cx + 7, crown_y - 9), (cx, crown_y)], fill=yellow + (255,))
+    d.rectangle([mx_l, mx_t, mx_l + w, mx_t + h], outline=(150, 150, 150), width=1)
 
-    # القياسات بالمليمتر (خضراء) — تُحسب من المقاس الفعلي
-    d2 = ImageDraw.Draw(out)
-    total_h_mm = h / DPI * 25.4
-    total_w_mm = w / DPI * 25.4
-    head_min_mm = total_h_mm * 0.711
-    head_max_mm = total_h_mm * 0.80
-    gx = 7
-    d2.line([(gx, 0), (gx, h - 1)], fill=green, width=1)
-    d2.line([(gx - 3, 0), (gx + 3, 0)], fill=green, width=1)
-    d2.line([(gx - 3, h - 1), (gx + 3, h - 1)], fill=green, width=1)
-    _vlabel(out, f"{total_h_mm:.0f} mm", (0, int(h * 0.42)), green + (255,))
-    gx2 = 20
-    d2.line([(gx2, crown_out), (gx2, chin_y)], fill=green, width=1)
-    d2.line([(gx2 - 3, crown_out), (gx2 + 3, crown_out)], fill=green, width=1)
-    d2.line([(gx2 - 3, chin_y), (gx2 + 3, chin_y)], fill=green, width=1)
-    _vlabel(out, f"{head_min_mm:.0f}-{head_max_mm:.0f} mm",
-            (13, int((crown_out + chin_y) / 2 - 30)), green + (255,))
-    d2.text((w / 2 - 18, h - 16), f"{total_w_mm:.0f} mm", font=_font(13), fill=green)
-    return out
+    # --- أسهم الأبعاد في الهوامش (خضراء، كالقوالب المعتمدة) ---
+    def varrow(x, y0, y1):
+        d.line([(x, y0), (x, y1)], fill=green, width=2)
+        d.polygon([(x - 5, y0 + 8), (x + 5, y0 + 8), (x, y0)], fill=green)
+        d.polygon([(x - 5, y1 - 8), (x + 5, y1 - 8), (x, y1)], fill=green)
+
+    def harrow(y, x0, x1):
+        d.line([(x0, y), (x1, y)], fill=green, width=2)
+        d.polygon([(x0 + 8, y - 5), (x0 + 8, y + 5), (x0, y)], fill=green)
+        d.polygon([(x1 - 8, y - 5), (x1 - 8, y + 5), (x1, y)], fill=green)
+
+    # الارتفاع الكلي — يسار
+    varrow(mx_l - 12, mx_t, mx_t + h)
+    _vlabel(canvas, f"{total_h_mm:.1f} mm", (mx_l - 34, int(mx_t + h * 0.40)), green + (255,), f_big)
+    # العرض الكلي — أسفل
+    harrow(mx_t + h + 14, mx_l, mx_l + w)
+    d.text((mx_l + w / 2 - 26, mx_t + h + 22), f"{total_w_mm:.1f} mm",
+           font=_font(f_big), fill=green)
+    # موضع الذقن من الأعلى — يمين قريب
+    chin_mm = total_h_mm * GUIDE_CHIN
+    varrow(mx_l + w + 12, mx_t, chin_y)
+    _vlabel(canvas, f"{chin_mm:.1f} mm ({chin_mm * 0.914:.1f}-{chin_mm * 1.086:.1f})",
+            (mx_l + w + 16, int(mx_t + h * 0.26)), green + (255,), f_small)
+    # بعد العينين عن الأسفل — يمين بعيد
+    eye_mm = total_h_mm * (1 - GUIDE_EYE)
+    varrow(mx_l + w + int(mx_r * 0.52), eye_y, mx_t + h)
+    _vlabel(canvas, f"{eye_mm:.1f} mm ({eye_mm * 0.90:.1f}-{eye_mm * 1.10:.1f})",
+            (mx_l + w + int(mx_r * 0.52) + 5, int(mx_t + h * 0.62)), green + (255,), f_small)
+    return canvas
 
 
 def save_jpg(img: Image.Image, path: str, target_kb: float = 0) -> str:
@@ -450,22 +481,115 @@ PREVIEW_ARGS = ("angle", "zoom", "pan_x", "pan_y", "size_label", "custom_w",
                 "temperature")
 
 
+_mtcnn_detector = None
+
+
+def _get_mtcnn():
+    global _mtcnn_detector
+    if _mtcnn_detector is None:
+        from mtcnnruntime import MTCNN
+        _mtcnn_detector = MTCNN()
+    return _mtcnn_detector
+
+
+def compute_auto_init(matting_bgra, width, height):
+    """
+    استخراج ضبط ابتدائي للوضع اليدوي يطابق تأطير القص التلقائي:
+    يُحاكي نافذة adjust_photo (نفس الحسابات والخطوة الثانية وخطوة الإزاحة)
+    على نسخة إزالة الخلفية مع مستطيل الوجه من MTCNN، ثم يحوّل النافذة إلى
+    (تكبير، إزاحة أفقية، إزاحة عمودية) لمنزلقات الوضع اليدوي.
+    يعيد None عند عدم كشف وجه واحد واضح.
+    """
+    import math
+    try:
+        rgb = np.array(composite_bg(matting_bgra, (255, 255, 255)))
+        faces, _lm = _get_mtcnn().detect(rgb)
+        if faces is None or len(faces) == 0:
+            return None
+        # عند تعدد الوجوه (صورة جماعية) نوسّط على الأكبر — نقطة بداية يحرّكها المستخدم
+        faces = sorted(faces, key=lambda f: (f[2] - f[0]) * (f[3] - f[1]), reverse=True)
+        n_faces = len(faces)
+        fx1, fy1, fx2, fy2 = [float(v) for v in faces[0][:4]]
+        x, y, w, h = fx1, fy1, fx2 - fx1, fy2 - fy1
+        mh, mw = matting_bgra.shape[:2]
+        face_center = (x + w / 2, y + h / 2)
+        crop_measure = (w * h) / CROP_PARAMS["head_measure_ratio"]
+        rrs = math.sqrt(crop_measure / (height * width))
+        crop_size = (int(height * rrs), int(width * rrs))
+        x1 = int(face_center[0] - crop_size[1] / 2)
+        y1 = int(face_center[1] - crop_size[0] * CROP_PARAMS["head_height_ratio"])
+        x2, y2 = x1 + crop_size[1], y1 + crop_size[0]
+        cut = IDphotos_cut(x1, y1, x2, y2, matting_bgra)
+        cut = cv2.resize(cut, (crop_size[1], crop_size[0]))
+        y_top, _yb, x_left, x_right = get_box(cut.astype(np.uint8), model=2,
+                                              correction_factor=0)
+        if x_left > 0 or x_right > 0:
+            cut_value_top = int(((x_left + x_right) * (height / width)) / 2)
+        else:
+            cut_value_top = 0
+        status_top, move_value = detect_distance(
+            y_top - cut_value_top, crop_size[0],
+            max=CROP_PARAMS["head_top_range"][0], min=CROP_PARAMS["head_top_range"][1])
+        X1 = x1 + x_left
+        Y1 = y1 + cut_value_top + status_top * move_value
+        X2 = x2 - x_right
+        Y2 = y2 - cut_value_top + status_top * move_value
+        win_img = IDphotos_cut(X1, Y1, X2, Y2, matting_bgra)
+        _moved, y_high = move(win_img.astype(np.uint8))
+        Y1 -= y_high
+        Y2 -= y_high
+        win_w, win_h = X2 - X1, Y2 - Y1
+        if win_w <= 10 or win_h <= 10:
+            return None
+        s_total = width / win_w
+        base = max(width / mw, height / mh)
+        zoom = max(0.2, min(5.0, s_total / base))
+        ex = mw * s_total - width
+        ey = mh * s_total - height
+        fx = (X1 * s_total) / ex if ex > 1 else 0.5
+        fy = (Y1 * s_total) / ey if ey > 1 else 0.5
+        pan_x = max(-100.0, min(100.0, (fx - 0.5) * 200))
+        pan_y = max(-100.0, min(100.0, (fy - 0.5) * 200))
+        return float(zoom), float(pan_x), float(pan_y), n_faces
+    except Exception:
+        return None
+
+
 def on_upload(img, mode, *preview_vals):
-    """عند رفع صورة: إزالة الخلفية مرة واحدة وبناء نسخة الجودة العالية — الضبط بعدها فوري."""
+    """عند رفع صورة: إزالة الخلفية مرة واحدة + بناء نسخة HQ + توسيط الوجه تلقائياً للوضع اليدوي."""
+    skip = gr.skip()
     if img is None:
-        return None, None, ""
+        return None, None, "", skip, skip, skip
     try:
         bgr = normalize_input(img)
-        result = get_creator()(bgr, change_bg_only=True)
+        creator = get_creator()
+        result = creator(bgr, change_bg_only=True)
         state = {"matting": result.standard,
-                 "matting_hq": build_virtual_bgra(bgr, result.standard)}
+                 "matting_hq": build_virtual_bgra(bgr, result.standard),
+                 "init": None}
+        height, width = resolve_size(preview_vals[4], preview_vals[5], preview_vals[6])
+        _init = compute_auto_init(result.standard, width, height)
+        state["init"] = _init[:3] if _init else None
+        state["init_faces"] = _init[3] if _init else 0
     except Exception as e:
-        return None, None, f"تعذّر تجهيز الصورة: {e}"
-    preview = None
-    if mode == MODES[1]:
-        preview = manual_preview(state, *preview_vals)
+        return None, None, f"تعذّر تجهيز الصورة: {e}", skip, skip, skip
+    init = state["init"]
+    vals = list(preview_vals)
+    if init is not None:
+        vals[1], vals[2], vals[3] = init
+    preview = manual_preview(state, *vals) if mode == MODES[1] else None
     hq_note = " بدقة عالية كاملة" if state["matting_hq"] is not None else ""
-    return state, preview, f"تم تجهيز الصورة وإزالة خلفيتها{hq_note} ✓ — جاهزة للصنع أو للضبط اليدوي."
+    if init is not None:
+        if state.get("init_faces", 1) > 1:
+            status = (f"تم تجهيز الصورة{hq_note} ✓ ووُسّطت على أكبر وجه ظاهر — "
+                      "حرّك الإطار بالمنزلقات نحو الشخص المقصود إن كان غيره، أو اصنع مباشرة.")
+        else:
+            status = (f"تم تجهيز الصورة{hq_note} ✓ ووُسّط الوجه تلقائياً كما في القص الذكي — "
+                      "في الوضع اليدوي حرّك قليلاً يميناً أو يساراً أو ارفع وأنزل إن أردت، أو اصنع مباشرة.")
+        return state, preview, status, init[0], init[1], init[2]
+    status = (f"تم تجهيز الصورة{hq_note} ✓ — لم يُكتشف وجه واحد واضح للتوسيط التلقائي "
+              "(صورة جماعية أو وجه غير واضح)، اضبط القص يدوياً بالمنزلقات.")
+    return state, preview, status, skip, skip, skip
 
 
 def manual_preview(state, angle, zoom, pan_x, pan_y, size_label, custom_w, custom_h,
@@ -503,8 +627,9 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         # ---------- الوضع اليدوي ----------
         if not state or "matting" not in state:
             raise gr.Error("ارفع الصورة أولاً وانتظر رسالة «تم تجهيز الصورة» — الضبط اليدوي يعمل على الصورة المجهّزة.")
-        source = state.get("matting_hq") or state["matting"]
-        hq_used = state.get("matting_hq") is not None
+        _hq = state.get("matting_hq")
+        source = _hq if _hq is not None else state["matting"]
+        hq_used = _hq is not None
         std_img = render_manual(source, angle, zoom, pan_x, pan_y, width, height, rgb)
         hd_w, hd_h = round(width * HD_FACTOR), round(height * HD_FACTOR)
         hd_img = render_manual(source, angle, zoom, pan_x, pan_y, hd_w, hd_h, rgb)
@@ -515,7 +640,7 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         bgr = normalize_input(img)
         creator = get_creator()
         try:
-            result = creator(bgr, size=(height, width), face_alignment=bool(align_face))
+            result = creator(bgr, size=(height, width), face_alignment=bool(align_face), **CROP_PARAMS)
         except FaceError as e:
             n = getattr(e, "face_num", 0)
             if n == 0:
@@ -561,33 +686,43 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
 
 
 # ----------------------------- الطباعة -----------------------------
+# دالتان منفصلتان (واحدة للصورة وواحدة للورقة المقسمة) — بلا أي مكوّنات حالة
+# وسيطة، حتى تصل الوسائط مرتبة تماماً كما هي معرّفة.
 
-PRINT_JS = """
-(files, kind, sheetLabel, sizeLabel, cwMm, chMm) => {
+_PRINT_BODY = """
   if (!files || !files.length) { alert('اصنع الصورة أولاً، ثم اطبعها'); return; }
-  const name = f => (f.name || f.path || '');
-  let pick = null;
-  if (kind === 'sheet') pick = files.filter(f => name(f).includes('sheet_')).pop();
-  else pick = files.filter(f => name(f).includes('photo_') && !name(f).includes('_hd')).pop();
+  const nm = f => ((f && (f.name || f.path || f.url)) || '');
+  let pick = files.filter(FILTER_EXPR).pop();
   const f = pick || files[files.length - 1];
-  const url = f.url || ('/file=' + f.path);
+  const url = (f && f.url) || (f && f.path ? '/file=' + f.path : null);
+  if (!url) { alert('تعذّر العثور على الملف للطباعة'); return; }
   let css = '';
-  if (kind === 'sheet') {
-    const size = sheetLabel.includes('15 × 20') ? '20cm 15cm' : '15cm 10cm';
-    css = '@page { size: ' + size + '; margin: 0; } body { margin: 0; } img { width: 100%; display: block; }';
-  } else {
-    const presets = {'3.5 × 4.5': [35, 45], '2.5 × 3.5': [25, 35], '3.5 × 4.9': [35, 49], '5 × 5': [50, 50]};
-    let wh = [35, 45];
-    for (const k in presets) { if (sizeLabel.includes(k)) { wh = presets[k]; break; } }
-    if (sizeLabel.includes('مخصص')) wh = [parseFloat(cwMm) || 35, parseFloat(chMm) || 45];
-    css = '@page { margin: 5mm; } body { margin: 0; } img { width: ' + wh[0] + 'mm; display: block; }';
-  }
+  CSS_EXPR
   const w = window.open('', '_blank', 'width=900,height=700');
   if (!w) { window.open(url, '_blank'); return; }
-  w.document.write('<html><head><meta charset="utf-8"><title>طباعة صورة الهوية</title><style>' + css + '</style></head><body><img src="' + url + '" onload="setTimeout(function(){ window.print(); }, 200);"></body></html>');
+  w.document.write('<html><head><meta charset="utf-8"><title>طباعة</title><style>' + css + '</style></head><body><img src="' + url + '" onload="setTimeout(function(){ window.print(); }, 250);"></body></html>');
   w.document.close();
-}
 """
+
+_SHEET_CSS = """
+  const size = sheetLabel.includes('15 × 20') ? '20cm 15cm' : '15cm 10cm';
+  css = '@page { size: ' + size + '; margin: 0; } body { margin: 0; } img { width: 100%; display: block; }';
+"""
+
+_PHOTO_CSS = """
+  const presets = {'3.5 × 4.5': 35, '2.5 × 3.5': 25, '3.5 × 4.9': 35, '5 × 5': 50};
+  let wmm = 35;
+  for (const k in presets) { if (sizeLabel.includes(k)) { wmm = presets[k]; break; } }
+  if (sizeLabel.includes('مخصص')) wmm = parseFloat(cwMm) || 35;
+  css = '@page { margin: 5mm; } body { margin: 0; } img { width: ' + wmm + 'mm; display: block; }';
+"""
+
+PRINT_SHEET_JS = ("(files, sheetLabel, sizeLabel, cwMm, chMm) => {" +
+                  _PRINT_BODY.replace("FILTER_EXPR", "f => nm(f).includes('sheet_')")
+                             .replace("CSS_EXPR", _SHEET_CSS) + "}")
+PRINT_PHOTO_JS = ("(files, sheetLabel, sizeLabel, cwMm, chMm) => {" +
+                  _PRINT_BODY.replace("FILTER_EXPR", "f => nm(f).includes('photo_') && !nm(f).includes('_hd')")
+                             .replace("CSS_EXPR", _PHOTO_CSS) + "}")
 
 # ----------------------------- الواجهة -----------------------------
 
@@ -622,8 +757,9 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                                    type="numpy", interactive=False, height=330,
                                    visible=(S["mode"] == MODES[1]))
             gr.Markdown(
-                "دليل الأدلة: البيضوي الأحمر المصمت = أقصى طول للرأس (36مم)، والمتقطع = أدناه (32مم)، "
-                "والشريط الأزرق = منطقة العينين، والأصفر = خط المنتصف. ضع الرأس بين البيضويين والعينين داخل الشريط.",
+                "دليل الأدلة (كما في القوالب المعتمدة): الأسهم الخضراء حول الصورة = الارتفاع والعرض الكليان، "
+                "وموضع الذقن من الأعلى، وبعد العينين عن الأسفل — بالمليمتر مع مجال التسامح. "
+                "وعلى الصورة: ضع قمة الرأس عند المنطقة الحمراء، والذقن عند الخط الأخضر، والعينين داخل الشريط الأزرق.",
                 visible=(S["mode"] == MODES[1]))
 
             with gr.Accordion("القص والمقاس", open=True):
@@ -642,11 +778,12 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                                              label="تدوير الصورة (درجة) — لاستقامة الكتفين والرأس")
                     angle_num = gr.Number(label="الزاوية بدقة (اكتب الرقم ثم Enter)", value=S["angle"],
                                           minimum=-15, maximum=15, step=0.1)
-                    zoom_slider = gr.Slider(0.3, 4.0, value=S["zoom"], step=0.01,
+                    zoom_slider = gr.Slider(0.2, 5.0, value=S["zoom"], step=0.01,
                                             label="التقريب والتبعيد (1 = ملء الإطار)")
                     pan_x = gr.Slider(-100, 100, value=S["pan_x"], step=1, label="إزاحة أفقية")
                     pan_y = gr.Slider(-100, 100, value=S["pan_y"], step=1, label="إزاحة عمودية")
                     guides_chk = gr.Checkbox(label="إظهار أدلة القص في المعاينة", value=S["guides"])
+                    center_btn = gr.Button("🎯 توسيط الوجه تلقائياً", size="sm")
                     reset_manual_btn = gr.Button("إعادة ضبط اليدوي", size="sm")
 
             with gr.Accordion("الألوان والإضاءة", open=False):
@@ -663,7 +800,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 sheet_radio = gr.Radio(list(SHEETS.keys()), value=S["sheet"], label="ورقة الطباعة")
                 with gr.Row():
                     print_photo_btn = gr.Button("🖨 طباعة الصورة", size="sm")
-                    print_sheet_btn = gr.Button("🖨 طباعة الورقة", size="sm")
+                    print_sheet_btn = gr.Button("🖨 طباعة الورقة المقسمة", size="sm")
                 gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة».")
 
             make_btn = gr.Button("اصنع صورة الهوية", variant="primary", elem_id="make-btn")
@@ -717,7 +854,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         return manual_preview(state_v, *vals)
 
     in_image.change(on_upload, inputs=[in_image, mode_radio] + PREVIEW_INPUTS,
-                    outputs=[state, out_preview, out_status])
+                    outputs=[state, out_preview, out_status, zoom_slider, pan_x, pan_y])
 
     for _c in (angle_slider, zoom_slider, pan_x, pan_y, bright_s, contrast_s,
                satur_s, sharp_s, shadows_s, highlights_s, temp_s):
@@ -737,6 +874,17 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         d.update({"angle": 0.0, "zoom": 1.0, "pan_x": 0, "pan_y": 0})
         save_settings_dict(d)
         return 0.0, 0.0, 1.0, 0, 0
+
+    def _apply_init(state_v, *vals):
+        init = (state_v or {}).get("init")
+        if not init:
+            return gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        v = list(vals)
+        v[1], v[2], v[3] = init
+        return init[0], init[1], init[2], manual_preview(state_v, *v)
+
+    center_btn.click(_apply_init, inputs=[state] + PREVIEW_INPUTS,
+                     outputs=[zoom_slider, pan_x, pan_y, out_preview])
 
     reset_manual_btn.click(_reset_manual, inputs=SETTINGS_INPUTS,
                            outputs=[angle_slider, angle_num, zoom_slider, pan_x, pan_y])
@@ -764,10 +912,10 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     )
 
     # ---------- الطباعة ----------
-    print_photo_btn.click(None, inputs=[out_files, gr.State("photo"), sheet_radio,
-                                        size_radio, custom_w, custom_h], js=PRINT_JS)
-    print_sheet_btn.click(None, inputs=[out_files, gr.State("sheet"), sheet_radio,
-                                        size_radio, custom_w, custom_h], js=PRINT_JS)
+    print_photo_btn.click(None, inputs=[out_files, sheet_radio,
+                                        size_radio, custom_w, custom_h], js=PRINT_PHOTO_JS)
+    print_sheet_btn.click(None, inputs=[out_files, sheet_radio,
+                                        size_radio, custom_w, custom_h], js=PRINT_SHEET_JS)
 
     gr.HTML("""
     <p style="text-align:center;color:#888;font-size:12px">
