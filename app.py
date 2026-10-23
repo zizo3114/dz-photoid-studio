@@ -24,7 +24,8 @@ import json
 import datetime
 import numpy as np
 import cv2
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+import io
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageCms
 import gradio as gr
 
 from hivision import IDCreator
@@ -170,14 +171,51 @@ def resolve_color(color_label, custom_color):
 
 # ----------------------------- معالجة الصور -----------------------------
 
-def normalize_input(img: np.ndarray) -> np.ndarray:
+def normalize_input(img) -> np.ndarray:
     """
-    تحويل أي صورة مرفوعة إلى BGR بثلاث قنوات — وهو ما يتوقعه المحرك.
-    الصور الشفافة (PNG بقناة ألفا) تُدمج أولاً على خلفية بيضاء؛
-    بدورها الأصلي كانت هذه الصور تعطّل نموذج إزالة الخلفية.
+    تحويل الصورة المرفوعة إلى BGR بثلاث قنوات — وهو ما يتوقعه المحرك.
+    عند استلام مسار ملف (وهو الحال من الواجهة): فك ترميز واعٍ بالألوان —
+    احترام ملف تعريف الألوان المضمّن (ICC) بتحويله إلى sRGB كما تفعل
+    المتصفحات وعارضات الصور (صور آيفون P3 وكاميرات AdobeRGB تنحرف ألوانها
+    بدونه)، وتطبيق اتجاه EXIF. الصور الشفافة تُدمج على أبيض أولاً.
     """
     if img is None:
         return None
+    if isinstance(img, (str, os.PathLike)):
+        pil = Image.open(img)
+        pil = ImageOps.exif_transpose(pil)
+        prof = None
+        icc = pil.info.get("icc_profile")
+        if icc:
+            try:
+                _p = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+                if "srgb" not in (ImageCms.getProfileName(_p) or "").lower():
+                    prof = _p
+            except Exception:
+                prof = None
+        has_alpha = pil.mode in ("RGBA", "LA") or (pil.mode == "P" and "transparency" in pil.info)
+        if has_alpha:
+            rgba = pil.convert("RGBA")
+            if prof is not None:
+                try:
+                    _rgb = ImageCms.profileToProfile(rgba.convert("RGB"), prof,
+                                                     ImageCms.createProfile("sRGB"),
+                                                     outputMode="RGB")
+                    rgba = Image.merge("RGBA", (*_rgb.split(), rgba.split()[3]))
+                except Exception:
+                    pass
+            white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+            pil = Image.alpha_composite(white, rgba).convert("RGB")
+        elif prof is not None:
+            try:
+                pil = ImageCms.profileToProfile(pil, prof,
+                                                 ImageCms.createProfile("sRGB"),
+                                                 outputMode="RGB")
+            except Exception:
+                pil = pil.convert("RGB")
+        else:
+            pil = pil.convert("RGB")
+        img = np.array(pil)
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     if img.ndim == 3 and img.shape[2] == 4:
@@ -622,6 +660,7 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
                sharpness=sharpness, shadows=shadows, highlights=highlights,
                temperature=temperature)
     hq_used = False
+    small_src = False
 
     if mode == MODES[1]:
         # ---------- الوضع اليدوي ----------
@@ -648,6 +687,13 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
             raise gr.Error(f"الصورة تحتوي {n} وجوه — صورة الهوية يجب أن تحتوي وجهاً واحداً فقط. اختر صورة فيها شخص واحد.")
         except Exception as e:
             raise gr.Error(f"حدث خطأ أثناء المعالجة: {e}")
+        try:
+            import math as _math
+            _rect = creator.ctx.face["rectangle"]
+            _rrs = _math.sqrt((_rect[2] * _rect[3] / CROP_PARAMS["head_measure_ratio"]) / (height * width))
+            small_src = int(width * _rrs) < width
+        except Exception:
+            small_src = False
         crop_hq = hq_rerender(bgr, creator, (height, width), bool(align_face))
         if crop_hq is not None:
             hq_used = True
@@ -675,6 +721,23 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         files.append(save_jpg(sheet, os.path.join(OUT_DIR, f"sheet_{stamp}.jpg"), 0))
         sheet_np = np.array(sheet)
 
+    if mode == MODES[1] and state and "matting" in state:
+        _src = state.get("matting_hq")
+        _src = _src if _src is not None else state["matting"]
+        _sh, _sw = _src.shape[:2]
+        _base = max(width / _sw, height / _sh)
+        small_src = (width / (_base * max(float(zoom), 0.01))) < width
+    _notes = []
+    if target_kb and target_kb > 0:
+        _notes.append(f"طُبّق ضغط الحجم إلى {int(target_kb)} KB بطلبك — الضغط يخفّض الجودة قليلاً بطبيعته")
+    _active = [nm for nm, off in (("السطوع", adj["brightness"] != 1.0), ("التباين", adj["contrast"] != 1.0),
+                                  ("التشبع", adj["saturation"] != 1.0), ("الحدة", adj["sharpness"] != 1.0),
+                                  ("الظلال", bool(adj["shadows"])), ("الإبرازات", bool(adj["highlights"])),
+                                  ("حرارة اللون", bool(adj["temperature"]))) if off]
+    if _active:
+        _notes.append("تعديلات ألوان مفعّلة (" + "، ".join(_active) + ") — هي وحدها ما يغيّر الألوان عن الأصل؛ للإلغاء اضغط «إعادة ضبط الألوان»")
+    if small_src:
+        _notes.append("الصورة الأصلية صغيرة أو الوجه بعيد فيها — النتيجة مكبّرة رقمياً وقد تبدو أقل حدة عند التكبير الشديد؛ صورة أقرب وأكبر تعطي نتيجة أفضل")
     mode_name = "يدوي" if mode == MODES[1] else "تلقائي"
     quality_note = " بمسار الجودة العالية من الأصلية كاملة الدقة" if hq_used else ""
     status = (
@@ -682,6 +745,8 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X} وبصيغة JPG عالية الجودة. "
         f"حُفظت الملفات في مجلد outputs ويمكنك تنزيلها أو طباعتها من الأسفل."
     )
+    if _notes:
+        status += " | تنبيه: " + "؛ ".join(_notes) + "."
     return np.array(std_img), np.array(hd_img), sheet_np, files, status
 
 
@@ -750,7 +815,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     with gr.Row():
         # ======== لوحة التحكم (يمين الشاشة) ========
         with gr.Column(scale=6):
-            in_image = gr.Image(label="١ — ارفع صورتك", type="numpy",
+            in_image = gr.Image(label="١ — ارفع صورتك", type="filepath",
                                 sources=["upload", "webcam"], height=280)
             mode_radio = gr.Radio(MODES, value=S["mode"], label="٢ — وضع العمل")
             out_preview = gr.Image(label="معاينة العمل (الأدلة هنا فقط — لا تظهر في النتائج أبداً)",
@@ -772,7 +837,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                                               visible=(S["color"] == "لون مخصص…"))
                 with gr.Group(visible=(S["mode"] == MODES[0])) as auto_group:
                     align_chk = gr.Checkbox(label="تصحيح ميلان الوجه تلقائياً (حسب العينين)", value=S["align"])
-                    kb_num = gr.Number(label="حجم ملف مستهدف (KB) — 0 يعني أعلى جودة", value=S["kb"], minimum=0)
+                    kb_num = gr.Number(label="حجم ملف مستهدف (KB) — 0 يعني أعلى جودة (يُضغط لهذه المرة فقط ولا يُحفظ)", value=0, minimum=0)
                 with gr.Group(visible=(S["mode"] == MODES[1])) as manual_group:
                     angle_slider = gr.Slider(-15, 15, value=S["angle"], step=0.1,
                                              label="تدوير الصورة (درجة) — لاستقامة الكتفين والرأس")
@@ -815,11 +880,11 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
     # ---------- حفظ الإعدادات (بمنع التكرار داخل save_settings_dict) ----------
     SETTINGS_KEYS = ["mode", "size", "custom_w", "custom_h", "color", "custom_color",
-                     "sheet", "align", "kb", "angle", "zoom", "pan_x", "pan_y", "guides",
+                     "sheet", "align", "angle", "zoom", "pan_x", "pan_y", "guides",
                      "brightness", "contrast", "saturation", "sharpness",
                      "shadows", "highlights", "temperature"]
     SETTINGS_INPUTS = [mode_radio, size_radio, custom_w, custom_h, color_radio,
-                       custom_color, sheet_radio, align_chk, kb_num, angle_slider,
+                       custom_color, sheet_radio, align_chk, angle_slider,
                        zoom_slider, pan_x, pan_y, guides_chk, bright_s, contrast_s,
                        satur_s, sharp_s, shadows_s, highlights_s, temp_s]
 
