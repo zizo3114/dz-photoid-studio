@@ -17,7 +17,8 @@ if not defined PY (
   pause
   exit /b 1
 )
-echo تم العثور على بايثون: %PY%
+for /f "tokens=*" %%V in ('%PY% --version 2^>^&1') do set PYVER=%%V
+echo تم العثور على بايثون: %PY% - %PYVER%
 
 REM ---------- إنشاء البيئة الافتراضية أول مرة ----------
 if not exist .venv\Scripts\python.exe (
@@ -30,9 +31,12 @@ REM ---------- تثبيت المكتبات أول مرة ----------
 if not exist .venv\.installed (
   echo تثبيت المكتبات - قد يأخذ بضع دقائق أول مرة...
   %VPY% -m pip install --upgrade pip
-  %VPY% -m pip install -r requirements.txt
+  %VPY% -m pip install --prefer-binary -r requirements.txt
   if errorlevel 1 (
-    echo فشل تثبيت المكتبات. تحقق من اتصال الإنترنت وحاول مجددا.
+    echo.
+    echo فشل تثبيت المكتبات. أغلق هذا النافذة وشغّل الملف مرة أخرى -
+    echo فكثير من الأعطال المؤقتة تُحل في المحاولة الثانية.
+    echo وإن تكرر نفس الخطأ، صوّر الشاشة كاملة وأرسلها.
     pause
     exit /b 1
   )
