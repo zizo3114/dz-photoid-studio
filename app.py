@@ -6,10 +6,15 @@
 (https://github.com/Zeyi-Lin/HivisionIDPhotos — رخصة Apache-2.0).
 المحرك: كشف وجه MTCNN بعتبات صارمة + قاعدة «وجه واحد فقط»،
 وقصّ ذكي بنسب رأس قياسية، وإزالة خلفية بنموذج MODNet المهيّأ لصور الهوية.
-يوجد أيضاً وضع يدوي كامل: تدوير بالدرجة، تقريب وإزاحة، خطوط إرشاد
-(خط المنتصف، خط العينين ودائرتاهما، قمة الرأس، الذقن)، وضبط ألوان.
-كل المعالجة تتم على جهاز المستخدم — بدون إنترنت بعد التثبيت الأول.
-وتُحفظ كل الإعدادات في settings.json لتعود كما تركتها في كل تشغيل.
+
+مسار جودة عالٍ (HQ): المحرك يعمل داخلياً على نسخة مصغّرة (2000px)؛
+عند توفر صورة أصلية أكبر نعيد بناء القص النهائي من بكسلات الأصلية كاملة
+الدقة بنفس هندسة المحرك، مع تحسين حدة خفيف قياسي — فتبقى التفاصيل.
+
+وضع يدوي كامل: تدوير بالدرجة، تقريب وإزاحة، وأدلة قص احترافية على
+المعاينة فقط (بيضوي رأس مزدوج بقياسات المليمتر، شريط منطقة العينين،
+خطوط عرض الرأس وخط المنتصف) — لا تظهر الأدلة في أي ملف نهائي.
+كل المعالجة على جهاز المستخدم، والإعدادات محفوظة في settings.json.
 """
 import os
 
@@ -19,11 +24,13 @@ import json
 import datetime
 import numpy as np
 import cv2
-from PIL import Image, ImageDraw, ImageEnhance
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 import gradio as gr
 
 from hivision import IDCreator
 from hivision.creator.choose_handler import choose_handler
+from hivision.creator.context import Context, Params
+from hivision.creator.photo_adjuster import adjust_photo
 from hivision.error import FaceError
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +38,9 @@ OUT_DIR = os.path.join(BASE_DIR, "outputs")
 os.makedirs(OUT_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 DPI = 300
-HD_FACTOR = 1.4526  # نسبة النسخة عالية الدقة إلى القياسية (كما في المحرك)
+HD_FACTOR = 1.4526      # نسبة النسخة عالية الدقة إلى القياسية
+HQ_MIN_EDGE = 2100      # فوق هذا الحد نفعّل مسار الجودة العالية
+HQ_MAX_EDGE = 6000      # سقف أبعاد المسار عالي الجودة (توازن جودة/ذاكرة)
 
 # ----------------------------- المقاسات والألوان والأوراق -----------------------------
 
@@ -86,8 +95,17 @@ def load_settings():
         return dict(DEFAULT_SETTINGS)
 
 
+_last_saved_json = None
+
+
 def save_settings_dict(values):
+    """حفظ الإعدادات — مع تخطّي الكتابة إن لم يتغيّر شيء (منعاً لأي تكرار زائد)."""
+    global _last_saved_json
     try:
+        payload = json.dumps(values, ensure_ascii=False, sort_keys=True)
+        if payload == _last_saved_json:
+            return
+        _last_saved_json = payload
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(values, f, ensure_ascii=False, indent=1)
     except Exception:
@@ -95,7 +113,6 @@ def save_settings_dict(values):
 
 
 SETTINGS = load_settings()
-
 _creator = None
 
 
@@ -169,6 +186,21 @@ def composite_bg(bgra: np.ndarray, rgb) -> Image.Image:
     return Image.alpha_composite(canvas, fg).convert("RGB")
 
 
+def finalize_from_crop(crop_bgra: np.ndarray, target_w: int, target_h: int, rgb) -> Image.Image:
+    """تصغير قصّ BGRA عالي الدقة إلى المقاس الهدف بـ LANCZOS وتركيبه على الخلفية."""
+    rgba = cv2.cvtColor(crop_bgra, cv2.COLOR_BGRA2RGBA)
+    fg = Image.fromarray(rgba, mode="RGBA")
+    if fg.size != (target_w, target_h):
+        fg = fg.resize((target_w, target_h), Image.LANCZOS)
+    canvas = Image.new("RGBA", (target_w, target_h), tuple(rgb) + (255,))
+    return Image.alpha_composite(canvas, fg).convert("RGB")
+
+
+def mild_sharpen(img: Image.Image) -> Image.Image:
+    """تحسين حدة خفيف قياسي (قناع إزالة ضباب) — يعيد للتفاصيل حضورها بعد التصغير."""
+    return img.filter(ImageFilter.UnsharpMask(radius=2, percent=55, threshold=2))
+
+
 def apply_color_adjustments(img: Image.Image, brightness=1.0, contrast=1.0,
                             saturation=1.0, sharpness=1.0, shadows=0,
                             highlights=0, temperature=0) -> Image.Image:
@@ -200,6 +232,55 @@ def apply_color_adjustments(img: Image.Image, brightness=1.0, contrast=1.0,
     return out
 
 
+def build_virtual_bgra(orig_bgr: np.ndarray, capped_matting: np.ndarray):
+    """
+    بناء نسخة افتراضية كاملة الدقة من صورة الإزالة: بكسلات الأصلية الحقيقية
+    + قناة الشفافية من المحرك مكبّرة. تُستخدم في مسار الجودة العالية.
+    تعيد None إن كانت الأصلية صغيرة أصلاً (لا فائدة منها).
+    """
+    oh, ow = orig_bgr.shape[:2]
+    if max(ow, oh) <= HQ_MIN_EDGE:
+        return None
+    f = min(1.0, HQ_MAX_EDGE / max(ow, oh))
+    vw, vh = int(ow * f), int(oh * f)
+    orig_v = (cv2.resize(orig_bgr, (vw, vh), interpolation=cv2.INTER_AREA)
+              if f < 1.0 else orig_bgr)
+    alpha_v = cv2.resize(capped_matting[:, :, 3], (vw, vh),
+                         interpolation=cv2.INTER_LINEAR)
+    return cv2.merge((orig_v[:, :, 0], orig_v[:, :, 1], orig_v[:, :, 2], alpha_v))
+
+
+def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignment: bool):
+    """
+    إعادة بناء قصّ المحرك من الأصلية كاملة الدقة:
+    نأخذ مستطيل الوجه الذي كشفه المحرك على النسخة المصغّرة، نطابقه على
+    النسخة الافتراضية كاملة الدقة، ونعيد تشغيل حسابات القص نفسها.
+    تعيد مصفوفة BGRA للقص عالي الدقة أو None عند عدم الإمكانية.
+    """
+    try:
+        ctx = creator.ctx
+        if ctx is None or ctx.face is None or ctx.face.get("rectangle") is None:
+            return None
+        # إن دوّر المحرك الصورة داخلياً لتصحيح ميلان كبير، تختلف الهندسة — نتراجع بأمان
+        roll = ctx.face.get("roll_angle") or 0
+        if face_alignment and abs(roll) > 2:
+            return None
+        virt = build_virtual_bgra(orig_bgr, ctx.matting_image)
+        if virt is None:
+            return None
+        ch, cw = ctx.origin_image.shape[:2]
+        k = virt.shape[1] / cw
+        rect = ctx.face["rectangle"]
+        ctx2 = Context(Params(size=size_hw))
+        ctx2.matting_image = virt
+        ctx2.face = {"rectangle": [rect[0] * k, rect[1] * k, rect[2] * k, rect[3] * k],
+                     "roll_angle": roll}
+        hd_a, _std_a, _clothing, _typo = adjust_photo(ctx2)
+        return hd_a
+    except Exception:
+        return None
+
+
 def render_manual(matting_bgra: np.ndarray, angle, zoom, pan_x, pan_y,
                   target_w: int, target_h: int, rgb) -> Image.Image:
     """
@@ -229,29 +310,90 @@ def render_manual(matting_bgra: np.ndarray, angle, zoom, pan_x, pan_y,
     return Image.alpha_composite(canvas, crop).convert("RGB")
 
 
+def _font(size: int):
+    try:
+        return ImageFont.load_default(size=size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _vlabel(base: Image.Image, text: str, xy, fill):
+    """رسم نص عمودي (مدوّر 90°) على الصورة."""
+    tmp = Image.new("RGBA", (120, 24), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tmp)
+    td.text((2, 4), text, font=_font(13), fill=fill)
+    tmp = tmp.rotate(90, expand=True)
+    base.paste(tmp, xy, tmp)
+
+
 def draw_guides(img: Image.Image) -> Image.Image:
-    """خطوط إرشاد احترافية تُرسم على المعاينة فقط — لا تظهر في الصورة النهائية."""
-    out = img.copy()
-    d = ImageDraw.Draw(out, "RGBA")
+    """
+    أدلة قص احترافية على المعاينة فقط — مستوحاة من برامج صور الهوية المعتمدة:
+    بيضوي رأس خارجي (أقصى طول 36مم) وداخلي متقطع (أدنى طول 32مم) بنفس الذقن،
+    شريط منطقة العينين الأزرق الشفاف، خطا عرض الرأس، خط المنتصف،
+    منطقة حمراء فوق قمة الرأس، وقياسات بالمليمتر على اليسار والأسفل.
+    النِّسب من طول الصورة: الذقن 88%، القمة الخارجية 8% (36مم من 45)،
+    القمة الداخلية 16.9% (32مم من 45) — وتتدرج القياسات مع أي مقاس.
+    """
+    out = img.copy().convert("RGB")
     w, h = out.size
+    ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    red = (230, 40, 40)
+    yellow = (250, 200, 0)
+    blue = (60, 130, 220)
+    green = (30, 160, 70)
+
+    chin_y = h * 0.88
+    crown_out = h * 0.08            # طول رأس 36مم
+    crown_in = chin_y - h * 0.711   # طول رأس 32مم
+    ox0, ox1 = w * 0.19, w * 0.81   # البيضوي الخارجي
+    ix0, ix1 = w * 0.25, w * 0.75   # البيضوي الداخلي
+
+    # منطقة ممنوعة فوق قمة الرأس (حمراء شفافة بميلان خفيف)
+    d.rectangle([0, 0, w, crown_out], fill=(230, 40, 40, 46))
+    for hx in range(-int(crown_out), w, 14):
+        d.line([(hx, crown_out), (hx + crown_out, 0)], fill=(230, 40, 40, 70), width=1)
+    # شريط منطقة العينين (أزرق شفاف)
+    d.rectangle([0, h * 0.42, w, h * 0.58], fill=(90, 160, 235, 42))
+    # خطا عرض الرأس (أزرق) بطول الصورة
+    for x in (ox0, ox1):
+        d.line([(x, 0), (x, h)], fill=blue + (190,), width=1)
+    # البيضوي الخارجي (أحمر مصمت) والداخلي (أحمر متقطع)
+    d.ellipse([ox0, crown_out, ox1, chin_y], outline=red + (255,), width=3)
+    steps = 90
+    for i in range(steps):
+        if i % 2 == 0:
+            a0 = i / steps * 360
+            a1 = (i + 1) / steps * 360
+            d.arc([ix0, crown_in, ix1, chin_y], start=a0, end=a1, fill=red + (230,), width=2)
+    # خط المنتصف (أصفر) وخط العينين
+    d.line([(w / 2, 0), (w / 2, h)], fill=yellow + (255,), width=2)
+    d.line([(0, h * 0.52), (w, h * 0.52)], fill=yellow + (160,), width=1)
+    # مثلث علامة قمة الرأس
     cx = w / 2
-    red = (238, 52, 52, 230)
-    green = (28, 178, 76, 230)
-    amber = (245, 166, 0, 235)
-    # خط المنتصف العمودي
-    d.line([(cx, 0), (cx, h)], fill=red, width=2)
-    # قمة الرأس والذقن
-    top_y, chin_y = h * 0.08, h * 0.80
-    d.line([(0, top_y), (w, top_y)], fill=amber, width=2)
-    d.line([(0, chin_y), (w, chin_y)], fill=amber, width=2)
-    # إطار الرأس البيضوي بين القمة والذقن
-    d.ellipse([w * 0.235, top_y, w * 0.765, chin_y], outline=amber, width=2)
-    # خط العينين ودائرتا العينين
-    eye_y = h * 0.55
-    d.line([(0, eye_y), (w, eye_y)], fill=green, width=2)
-    r = w * 0.048
-    for ex in (cx - w * 0.135, cx + w * 0.135):
-        d.ellipse([ex - r, eye_y - r, ex + r, eye_y + r], outline=green, width=2)
+    d.polygon([(cx - 7, crown_out - 9), (cx + 7, crown_out - 9), (cx, crown_out)],
+              fill=yellow + (255,))
+    out = Image.alpha_composite(out.convert("RGBA"), ov).convert("RGB")
+
+    # القياسات بالمليمتر (خضراء) — تُحسب من المقاس الفعلي
+    d2 = ImageDraw.Draw(out)
+    total_h_mm = h / DPI * 25.4
+    total_w_mm = w / DPI * 25.4
+    head_min_mm = total_h_mm * 0.711
+    head_max_mm = total_h_mm * 0.80
+    gx = 7
+    d2.line([(gx, 0), (gx, h - 1)], fill=green, width=1)
+    d2.line([(gx - 3, 0), (gx + 3, 0)], fill=green, width=1)
+    d2.line([(gx - 3, h - 1), (gx + 3, h - 1)], fill=green, width=1)
+    _vlabel(out, f"{total_h_mm:.0f} mm", (0, int(h * 0.42)), green + (255,))
+    gx2 = 20
+    d2.line([(gx2, crown_out), (gx2, chin_y)], fill=green, width=1)
+    d2.line([(gx2 - 3, crown_out), (gx2 + 3, crown_out)], fill=green, width=1)
+    d2.line([(gx2 - 3, chin_y), (gx2 + 3, chin_y)], fill=green, width=1)
+    _vlabel(out, f"{head_min_mm:.0f}-{head_max_mm:.0f} mm",
+            (13, int((crown_out + chin_y) / 2 - 30)), green + (255,))
+    d2.text((w / 2 - 18, h - 16), f"{total_w_mm:.0f} mm", font=_font(13), fill=green)
     return out
 
 
@@ -302,30 +444,34 @@ def build_sheet(tile: Image.Image, sheet_cfg) -> Image.Image:
 
 # ----------------------------- أحداث الواجهة -----------------------------
 
-def on_upload(img, mode, angle, zoom, pan_x, pan_y, size_label, custom_w, custom_h,
-              color_label, custom_color, guides, brightness, contrast, saturation,
-              sharpness, shadows, highlights, temperature):
-    """عند رفع صورة: إزالة الخلفية مرة واحدة وتخزينها — الضبط اليدوي بعدها فوري."""
+PREVIEW_ARGS = ("angle", "zoom", "pan_x", "pan_y", "size_label", "custom_w",
+                "custom_h", "color_label", "custom_color", "guides", "brightness",
+                "contrast", "saturation", "sharpness", "shadows", "highlights",
+                "temperature")
+
+
+def on_upload(img, mode, *preview_vals):
+    """عند رفع صورة: إزالة الخلفية مرة واحدة وبناء نسخة الجودة العالية — الضبط بعدها فوري."""
     if img is None:
         return None, None, ""
     try:
         bgr = normalize_input(img)
         result = get_creator()(bgr, change_bg_only=True)
-        state = {"matting": result.standard}
+        state = {"matting": result.standard,
+                 "matting_hq": build_virtual_bgra(bgr, result.standard)}
     except Exception as e:
         return None, None, f"تعذّر تجهيز الصورة: {e}"
     preview = None
     if mode == MODES[1]:
-        preview = manual_preview(state, angle, zoom, pan_x, pan_y, size_label,
-                                 custom_w, custom_h, color_label, custom_color,
-                                 guides, brightness, contrast, saturation,
-                                 sharpness, shadows, highlights, temperature)
-    return state, preview, "تم تجهيز الصورة وإزالة خلفيتها ✓ — جاهزة للصنع أو للضبط اليدوي."
+        preview = manual_preview(state, *preview_vals)
+    hq_note = " بدقة عالية كاملة" if state["matting_hq"] is not None else ""
+    return state, preview, f"تم تجهيز الصورة وإزالة خلفيتها{hq_note} ✓ — جاهزة للصنع أو للضبط اليدوي."
 
 
 def manual_preview(state, angle, zoom, pan_x, pan_y, size_label, custom_w, custom_h,
                    color_label, custom_color, guides, brightness, contrast,
                    saturation, sharpness, shadows, highlights, temperature):
+    """المعاينة تعمل على النسخة المصغّرة (سريعة) — النتيجة النهائية تُبنى بدقة كاملة."""
     if not state or "matting" not in state:
         return None
     try:
@@ -351,15 +497,17 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
     adj = dict(brightness=brightness, contrast=contrast, saturation=saturation,
                sharpness=sharpness, shadows=shadows, highlights=highlights,
                temperature=temperature)
+    hq_used = False
 
     if mode == MODES[1]:
         # ---------- الوضع اليدوي ----------
         if not state or "matting" not in state:
             raise gr.Error("ارفع الصورة أولاً وانتظر رسالة «تم تجهيز الصورة» — الضبط اليدوي يعمل على الصورة المجهّزة.")
-        matting = state["matting"]
-        std_img = render_manual(matting, angle, zoom, pan_x, pan_y, width, height, rgb)
+        source = state.get("matting_hq") or state["matting"]
+        hq_used = state.get("matting_hq") is not None
+        std_img = render_manual(source, angle, zoom, pan_x, pan_y, width, height, rgb)
         hd_w, hd_h = round(width * HD_FACTOR), round(height * HD_FACTOR)
-        hd_img = render_manual(matting, angle, zoom, pan_x, pan_y, hd_w, hd_h, rgb)
+        hd_img = render_manual(source, angle, zoom, pan_x, pan_y, hd_w, hd_h, rgb)
     else:
         # ---------- الوضع التلقائي ----------
         if img is None:
@@ -375,11 +523,20 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
             raise gr.Error(f"الصورة تحتوي {n} وجوه — صورة الهوية يجب أن تحتوي وجهاً واحداً فقط. اختر صورة فيها شخص واحد.")
         except Exception as e:
             raise gr.Error(f"حدث خطأ أثناء المعالجة: {e}")
-        std_img = composite_bg(result.standard, rgb)
-        hd_img = composite_bg(result.hd, rgb)
+        crop_hq = hq_rerender(bgr, creator, (height, width), bool(align_face))
+        if crop_hq is not None:
+            hq_used = True
+            std_img = finalize_from_crop(crop_hq, width, height, rgb)
+            hd_img = finalize_from_crop(crop_hq, round(width * HD_FACTOR),
+                                        round(height * HD_FACTOR), rgb)
+        else:
+            hd_img = composite_bg(result.hd, rgb)
+            std_img = (hd_img.resize((width, height), Image.LANCZOS)
+                       if hd_img.size != (width, height)
+                       else composite_bg(result.standard, rgb))
 
-    std_img = apply_color_adjustments(std_img, **adj)
-    hd_img = apply_color_adjustments(hd_img, **adj)
+    std_img = mild_sharpen(apply_color_adjustments(std_img, **adj))
+    hd_img = mild_sharpen(apply_color_adjustments(hd_img, **adj))
 
     stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     files = []
@@ -394,13 +551,43 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         sheet_np = np.array(sheet)
 
     mode_name = "يدوي" if mode == MODES[1] else "تلقائي"
+    quality_note = " بمسار الجودة العالية من الأصلية كاملة الدقة" if hq_used else ""
     status = (
-        f"تم بنجاح ✓ ({mode_name}) — صورة {width}×{height} بكسل (300 DPI) بخلفية "
+        f"تم بنجاح ✓ ({mode_name}{quality_note}) — صورة {width}×{height} بكسل (300 DPI) بخلفية "
         f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X} وبصيغة JPG عالية الجودة. "
-        f"حُفظت الملفات في مجلد outputs ويمكنك تنزيلها من الأسفل."
+        f"حُفظت الملفات في مجلد outputs ويمكنك تنزيلها أو طباعتها من الأسفل."
     )
     return np.array(std_img), np.array(hd_img), sheet_np, files, status
 
+
+# ----------------------------- الطباعة -----------------------------
+
+PRINT_JS = """
+(files, kind, sheetLabel, sizeLabel, cwMm, chMm) => {
+  if (!files || !files.length) { alert('اصنع الصورة أولاً، ثم اطبعها'); return; }
+  const name = f => (f.name || f.path || '');
+  let pick = null;
+  if (kind === 'sheet') pick = files.filter(f => name(f).includes('sheet_')).pop();
+  else pick = files.filter(f => name(f).includes('photo_') && !name(f).includes('_hd')).pop();
+  const f = pick || files[files.length - 1];
+  const url = f.url || ('/file=' + f.path);
+  let css = '';
+  if (kind === 'sheet') {
+    const size = sheetLabel.includes('15 × 20') ? '20cm 15cm' : '15cm 10cm';
+    css = '@page { size: ' + size + '; margin: 0; } body { margin: 0; } img { width: 100%; display: block; }';
+  } else {
+    const presets = {'3.5 × 4.5': [35, 45], '2.5 × 3.5': [25, 35], '3.5 × 4.9': [35, 49], '5 × 5': [50, 50]};
+    let wh = [35, 45];
+    for (const k in presets) { if (sizeLabel.includes(k)) { wh = presets[k]; break; } }
+    if (sizeLabel.includes('مخصص')) wh = [parseFloat(cwMm) || 35, parseFloat(chMm) || 45];
+    css = '@page { margin: 5mm; } body { margin: 0; } img { width: ' + wh[0] + 'mm; display: block; }';
+  }
+  const w = window.open('', '_blank', 'width=900,height=700');
+  if (!w) { window.open(url, '_blank'); return; }
+  w.document.write('<html><head><meta charset="utf-8"><title>طباعة صورة الهوية</title><style>' + css + '</style></head><body><img src="' + url + '" onload="setTimeout(function(){ window.print(); }, 200);"></body></html>');
+  w.document.close();
+}
+"""
 
 # ----------------------------- الواجهة -----------------------------
 
@@ -419,43 +606,50 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     gr.HTML("""
     <div id="app-title">
       <h1>🇩🇿 صانع صور الهوية — الجزائر</h1>
-      <p>قصّ ذكي أو ضبط يدوي كامل، إزالة خلفية احترافية، وضبط ألوان — كل شيء على جهازك وبدون إنترنت، وإعداداتك محفوظة</p>
+      <p>قصّ ذكي أو ضبط يدوي احترافي بأدلة قياس، جودة كاملة من صورتك الأصلية، وطباعة مباشرة — كل شيء على جهازك</p>
     </div>
     """)
 
     state = gr.State(None)
 
     with gr.Row():
-        with gr.Column(scale=5):
+        # ======== لوحة التحكم (يمين الشاشة) ========
+        with gr.Column(scale=6):
             in_image = gr.Image(label="١ — ارفع صورتك", type="numpy",
-                                sources=["upload", "webcam"], height=300)
+                                sources=["upload", "webcam"], height=280)
             mode_radio = gr.Radio(MODES, value=S["mode"], label="٢ — وضع العمل")
-            size_radio = gr.Radio(list(SIZES.keys()), value=S["size"], label="٣ — مقاس الصورة")
-            with gr.Row(visible=(S["size"] == "مقاس مخصص…")) as custom_size_row:
-                custom_w = gr.Number(label="العرض (مم)", value=S["custom_w"], minimum=8, maximum=250)
-                custom_h = gr.Number(label="الارتفاع (مم)", value=S["custom_h"], minimum=8, maximum=250)
-            color_radio = gr.Radio(list(COLORS.keys()), value=S["color"], label="٤ — لون الخلفية")
-            custom_color = gr.ColorPicker(label="اختر لونك", value=S["custom_color"],
-                                          visible=(S["color"] == "لون مخصص…"))
-            sheet_radio = gr.Radio(list(SHEETS.keys()), value=S["sheet"], label="٥ — ورقة الطباعة")
+            out_preview = gr.Image(label="معاينة العمل (الأدلة هنا فقط — لا تظهر في النتائج أبداً)",
+                                   type="numpy", interactive=False, height=330,
+                                   visible=(S["mode"] == MODES[1]))
+            gr.Markdown(
+                "دليل الأدلة: البيضوي الأحمر المصمت = أقصى طول للرأس (36مم)، والمتقطع = أدناه (32مم)، "
+                "والشريط الأزرق = منطقة العينين، والأصفر = خط المنتصف. ضع الرأس بين البيضويين والعينين داخل الشريط.",
+                visible=(S["mode"] == MODES[1]))
 
-            with gr.Group(visible=(S["mode"] == MODES[0])) as auto_group:
-                align_chk = gr.Checkbox(label="تصحيح ميلان الوجه تلقائياً (حسب العينين)", value=S["align"])
-                kb_num = gr.Number(label="حجم ملف مستهدف (KB) — 0 يعني أعلى جودة", value=S["kb"], minimum=0)
+            with gr.Accordion("القص والمقاس", open=True):
+                size_radio = gr.Radio(list(SIZES.keys()), value=S["size"], label="مقاس الصورة")
+                with gr.Row(visible=(S["size"] == "مقاس مخصص…")) as custom_size_row:
+                    custom_w = gr.Number(label="العرض (مم)", value=S["custom_w"], minimum=8, maximum=250)
+                    custom_h = gr.Number(label="الارتفاع (مم)", value=S["custom_h"], minimum=8, maximum=250)
+                color_radio = gr.Radio(list(COLORS.keys()), value=S["color"], label="لون الخلفية")
+                custom_color = gr.ColorPicker(label="اختر لونك", value=S["custom_color"],
+                                              visible=(S["color"] == "لون مخصص…"))
+                with gr.Group(visible=(S["mode"] == MODES[0])) as auto_group:
+                    align_chk = gr.Checkbox(label="تصحيح ميلان الوجه تلقائياً (حسب العينين)", value=S["align"])
+                    kb_num = gr.Number(label="حجم ملف مستهدف (KB) — 0 يعني أعلى جودة", value=S["kb"], minimum=0)
+                with gr.Group(visible=(S["mode"] == MODES[1])) as manual_group:
+                    angle_slider = gr.Slider(-15, 15, value=S["angle"], step=0.1,
+                                             label="تدوير الصورة (درجة) — لاستقامة الكتفين والرأس")
+                    angle_num = gr.Number(label="الزاوية بدقة (اكتب الرقم ثم Enter)", value=S["angle"],
+                                          minimum=-15, maximum=15, step=0.1)
+                    zoom_slider = gr.Slider(0.3, 4.0, value=S["zoom"], step=0.01,
+                                            label="التقريب والتبعيد (1 = ملء الإطار)")
+                    pan_x = gr.Slider(-100, 100, value=S["pan_x"], step=1, label="إزاحة أفقية")
+                    pan_y = gr.Slider(-100, 100, value=S["pan_y"], step=1, label="إزاحة عمودية")
+                    guides_chk = gr.Checkbox(label="إظهار أدلة القص في المعاينة", value=S["guides"])
+                    reset_manual_btn = gr.Button("إعادة ضبط اليدوي", size="sm")
 
-            with gr.Group(visible=(S["mode"] == MODES[1])) as manual_group:
-                gr.Markdown("**الضبط اليدوي** — حرّك المنزلقات وشاهد المعاينة مباشرة. الخطوط الملوّنة إرشادية فقط ولا تظهر في النتيجة.")
-                angle_slider = gr.Slider(-15, 15, value=S["angle"], step=0.1,
-                                         label="تدوير الصورة (درجة) — لاستقامة الكتفين والرأس")
-                angle_num = gr.Number(label="الزاوية بدقة", value=S["angle"], minimum=-15, maximum=15, step=0.1)
-                zoom_slider = gr.Slider(0.3, 4.0, value=S["zoom"], step=0.01,
-                                        label="التقريب والتبعيد (1 = ملء الإطار)")
-                pan_x = gr.Slider(-100, 100, value=S["pan_x"], step=1, label="إزاحة أفقية")
-                pan_y = gr.Slider(-100, 100, value=S["pan_y"], step=1, label="إزاحة عمودية")
-                guides_chk = gr.Checkbox(label="إظهار خطوط الإرشاد في المعاينة", value=S["guides"])
-                reset_manual_btn = gr.Button("إعادة ضبط اليدوي (صفّارة الكل)", size="sm")
-
-            with gr.Accordion("ضبط الألوان والإضاءة", open=False):
+            with gr.Accordion("الألوان والإضاءة", open=False):
                 bright_s = gr.Slider(0.5, 1.5, value=S["brightness"], step=0.01, label="السطوع")
                 contrast_s = gr.Slider(0.5, 1.5, value=S["contrast"], step=0.01, label="التباين")
                 satur_s = gr.Slider(0, 2.0, value=S["saturation"], step=0.01, label="تشبع الألوان")
@@ -465,24 +659,24 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 temp_s = gr.Slider(-50, 50, value=S["temperature"], step=1, label="حرارة اللون (بارد ← دافئ)")
                 reset_color_btn = gr.Button("إعادة ضبط الألوان", size="sm")
 
+            with gr.Accordion("الورقة والطباعة", open=False):
+                sheet_radio = gr.Radio(list(SHEETS.keys()), value=S["sheet"], label="ورقة الطباعة")
+                with gr.Row():
+                    print_photo_btn = gr.Button("🖨 طباعة الصورة", size="sm")
+                    print_sheet_btn = gr.Button("🖨 طباعة الورقة", size="sm")
+                gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة».")
+
             make_btn = gr.Button("اصنع صورة الهوية", variant="primary", elem_id="make-btn")
 
-        with gr.Column(scale=5):
-            out_preview = gr.Image(label="معاينة الضبط اليدوي (بخطوط الإرشاد)", type="numpy",
-                                   interactive=False, height=300,
-                                   visible=(S["mode"] == MODES[1]))
-            gr.Markdown(
-                "دليل الخطوط: 🔴 **خط المنتصف** — مرّر منه الأنف &nbsp;·&nbsp; "
-                "🟢 **خط العينين ودائرتاهما** — ضع العينين داخلهما &nbsp;·&nbsp; "
-                "🟠 **البيضوي** — الرأس داخله، قمّته عند الخط العلوي وذقنه عند السفلي",
-                visible=(S["mode"] == MODES[1]))
-            out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=300)
-            out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=220)
-            out_sheet = gr.Image(label="ورقة الطباعة", type="numpy", interactive=False, height=220)
+        # ======== النتائج: ثلاث صور فقط ========
+        with gr.Column(scale=4):
+            out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=330)
+            out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=250)
+            out_sheet = gr.Image(label="ورقة الطباعة", type="numpy", interactive=False, height=250)
             out_status = gr.Textbox(label="الحالة", interactive=False)
             out_files = gr.File(label="تنزيل الملفات (JPG بدقة 300 DPI)", file_count="multiple")
 
-    # ---------- حفظ الإعدادات تلقائياً عند أي تغيير ----------
+    # ---------- حفظ الإعدادات (بمنع التكرار داخل save_settings_dict) ----------
     SETTINGS_KEYS = ["mode", "size", "custom_w", "custom_h", "color", "custom_color",
                      "sheet", "align", "kb", "angle", "zoom", "pan_x", "pan_y", "guides",
                      "brightness", "contrast", "saturation", "sharpness",
@@ -498,7 +692,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     for _c in SETTINGS_INPUTS:
         _c.change(_persist, inputs=SETTINGS_INPUTS, outputs=None)
 
-    # ---------- إظهار/إخفاء حسب الاختيارات ----------
+    # ---------- إظهار/إخفاء ----------
     size_radio.change(lambda v: gr.update(visible=(v == "مقاس مخصص…")),
                       inputs=size_radio, outputs=custom_size_row)
     color_radio.change(lambda v: gr.update(visible=(v == "لون مخصص…")),
@@ -512,23 +706,31 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     mode_radio.change(_mode_switch, inputs=mode_radio,
                       outputs=[auto_group, manual_group, out_preview])
 
-    # ---------- الرفع والمعاينة اليدوية ----------
+    # ---------- المعاينة: أحداث محسوبة بعناية ----------
+    # المنزلقات تُطلق المعاينة عند الإفلات فقط (release) لا أثناء السحب،
+    # وخانة الزاوية عند الإدخال (submit) — لا حلقات إعادة بناء أبداً.
     PREVIEW_INPUTS = [angle_slider, zoom_slider, pan_x, pan_y, size_radio, custom_w,
                       custom_h, color_radio, custom_color, guides_chk, bright_s,
                       contrast_s, satur_s, sharp_s, shadows_s, highlights_s, temp_s]
 
-    in_image.change(on_upload,
-                    inputs=[in_image, mode_radio] + PREVIEW_INPUTS,
-                    outputs=[state, out_preview, out_status])
-
     def _preview(state_v, *vals):
         return manual_preview(state_v, *vals)
 
-    for _c in PREVIEW_INPUTS:
-        _c.change(_preview, inputs=[state] + PREVIEW_INPUTS, outputs=out_preview)
+    in_image.change(on_upload, inputs=[in_image, mode_radio] + PREVIEW_INPUTS,
+                    outputs=[state, out_preview, out_status])
 
-    angle_slider.change(lambda v: v, inputs=angle_slider, outputs=angle_num)
-    angle_num.change(lambda v: v, inputs=angle_num, outputs=angle_slider)
+    for _c in (angle_slider, zoom_slider, pan_x, pan_y, bright_s, contrast_s,
+               satur_s, sharp_s, shadows_s, highlights_s, temp_s):
+        _c.release(_preview, inputs=[state] + PREVIEW_INPUTS, outputs=out_preview)
+    for _c in (size_radio, color_radio, custom_color, guides_chk):
+        _c.change(_preview, inputs=[state] + PREVIEW_INPUTS, outputs=out_preview)
+    custom_w.change(_preview, inputs=[state] + PREVIEW_INPUTS, outputs=out_preview)
+    custom_h.change(_preview, inputs=[state] + PREVIEW_INPUTS, outputs=out_preview)
+    mode_radio.change(_preview, inputs=[state] + PREVIEW_INPUTS, outputs=out_preview)
+
+    angle_slider.release(lambda v: v, inputs=angle_slider, outputs=angle_num)
+    angle_num.submit(lambda v: v, inputs=angle_num, outputs=angle_slider)
+    angle_num.submit(_preview, inputs=[state] + PREVIEW_INPUTS, outputs=out_preview)
 
     def _reset_manual(*vals):
         d = dict(zip(SETTINGS_KEYS, vals))
@@ -561,11 +763,17 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         outputs=[out_std, out_hd, out_sheet, out_files, out_status],
     )
 
+    # ---------- الطباعة ----------
+    print_photo_btn.click(None, inputs=[out_files, gr.State("photo"), sheet_radio,
+                                        size_radio, custom_w, custom_h], js=PRINT_JS)
+    print_sheet_btn.click(None, inputs=[out_files, gr.State("sheet"), sheet_radio,
+                                        size_radio, custom_w, custom_h], js=PRINT_JS)
+
     gr.HTML("""
     <p style="text-align:center;color:#888;font-size:12px">
       مبني على محرك <a href="https://github.com/Zeyi-Lin/HivisionIDPhotos" target="_blank">HivisionIDPhotos</a>
       مفتوح المصدر (رخصة Apache-2.0) — كشف الوجه MTCNN وإزالة الخلفية MODNet.
-      الوضع التلقائي يطلب وجهاً واحداً واضحاً ويرفض ما عداه؛ والوضع اليدوي يترك القص بين يديك بالكامل.
+      الصور الكبيرة تُبنى نهائياً من بكسلاتها الأصلية كاملة الدقة (مسار HQ).
     </p>
     """)
 
