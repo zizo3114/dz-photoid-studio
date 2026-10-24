@@ -64,7 +64,7 @@ COLORS = {
 
 SHEETS = {
     "بدون ورقة طباعة": None,
-    "8 صور — ورقة 10 × 15 سم": ((1795, 1205), 4, 2),   # ورق المختبر الحقيقي 6×4 بوصة (152×102مم) عند 300 DPI
+    "8 صور — ورقة 10 × 15 سم": ((1800, 1200), 4, 2),   # ورق المختبر 6×4 بوصة بالضبط عند 300 DPI (152.4×101.6مم)
     "12 صورة — ورقة 15 × 20 سم": ((2400, 1800), 4, 3),  # ورق المختبر الحقيقي 8×6 بوصة (203×152مم) عند 300 DPI
 }
 
@@ -750,7 +750,7 @@ _PRINT_BODY = """
 
 _SHEET_CSS = """
   const size = sheetLabel.includes('15 × 20') ? '20.32cm 15.24cm' : '15.24cm 10.16cm';
-  css = '@page { size: ' + size + '; margin: 0; } body { margin: 0; } img { width: 100%; display: block; }';
+  css = '@page { size: ' + size + '; margin: 0; } html, body { margin: 0; padding: 0; } img { width: 100%; height: 100%; display: block; }';
 """
 
 _PHOTO_CSS = """
