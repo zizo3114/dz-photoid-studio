@@ -991,6 +991,20 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     """)
 
 if __name__ == "__main__":
-    demo.launch(inbrowser=True, server_name="127.0.0.1", server_port=7860,
+    # اختيار أول منفذ فارغ تلقائياً: إن بقيت نسخة قديمة من البرنامج تعمل في
+    # الخلفية (وهي ما تسبب خطأ «المنفذ مشغول») تُفتح الجديدة على المنفذ التالي.
+    import socket
+
+    def _free_port(start=7860):
+        for _p in range(start, start + 20):
+            with socket.socket() as _s:
+                try:
+                    _s.bind(("127.0.0.1", _p))
+                    return _p
+                except OSError:
+                    continue
+        return start
+
+    demo.launch(inbrowser=True, server_name="127.0.0.1", server_port=_free_port(),
                 theme=gr.themes.Soft(primary_hue="emerald", neutral_hue="slate"),
                 css=CUSTOM_CSS)
