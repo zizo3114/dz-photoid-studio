@@ -88,6 +88,7 @@ DEFAULT_SETTINGS = {
     "angle": 0.0, "zoom": 1.0, "pan_x": 0, "pan_y": 0, "guides": True,
     "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "sharpness": 1.0,
     "shadows": 0, "highlights": 0, "temperature": 0,
+    "inbox": "", "watch": False, "automake": False, "printer": "",
 }
 
 
@@ -761,6 +762,170 @@ _PHOTO_CSS = """
   css = '@page { margin: 5mm; } body { margin: 0; } img { width: ' + wmm + 'mm; display: block; }';
 """
 
+
+# ===================== الاستوديو: مراقبة المجلد + طباعة مباشرة =====================
+
+def newest_inbox_image(folder):
+    """أحدث صورة (JPG/PNG) في مجلد الاستقبال، أو None."""
+    try:
+        best, best_t = None, -1.0
+        for name in os.listdir(folder):
+            if name.lower().endswith((".jpg", ".jpeg", ".png")):
+                p = os.path.join(folder, name)
+                try:
+                    t = os.path.getmtime(p)
+                except OSError:
+                    continue
+                if t > best_t:
+                    best, best_t = p, t
+        return best
+    except OSError:
+        return None
+
+
+def _lan_ip():
+    try:
+        import socket
+        _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _s.connect(("8.8.8.8", 80))
+        ip = _s.getsockname()[0]
+        _s.close()
+        return ip
+    except Exception:
+        return None
+
+
+def watch_tick(wstate, inbox_dir, watch_on, auto_make, cur_img, mode,
+               sheet_label, align_face, kb,
+               angle, zoom, pan_x, pan_y, size_label, cw, ch,
+               color_label, custom_color, guides,
+               bright, contrast, satur, sharp, shadows, highlights, temp):
+    """
+    نبضة المؤقّت (كل ~1.5 ثانية): إن ظهرت صورة جديدة مستقرة الحجم في مجلد
+    الاستقبال (أي انتهت كتابتها من برنامج الكاميرا)، حمّلها كما لو رُفعت
+    يدوياً — واصنع صورة الهوية تلقائياً إن فعّل المستخدم ذلك.
+    """
+    _s = gr.skip()
+    SKIP12 = (_s,) * 12
+    if not watch_on or not inbox_dir or not os.path.isdir(str(inbox_dir).strip()):
+        return SKIP12
+    ws = dict(wstate or {})
+    path = newest_inbox_image(str(inbox_dir).strip())
+    if path is None or path == ws.get("loaded"):
+        return SKIP12
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return SKIP12
+    if ws.get("pending") != path or ws.get("pending_size") != size:
+        ws["pending"], ws["pending_size"] = path, size
+        return (ws,) + (_s,) * 11
+    ws["loaded"] = path
+    preview_vals = [angle, zoom, pan_x, pan_y, size_label, cw, ch,
+                    color_label, custom_color, guides,
+                    bright, contrast, satur, sharp, shadows, highlights, temp]
+    st, preview, ostatus, nzoom, npanx, npany = on_upload(path, mode, *preview_vals)
+    name = os.path.basename(path)
+    if st is None:
+        return (ws, path, None, None, _s, _s, _s, _s,
+                f"📥 وصلت صورة جديدة ({name}) لكن تعذّر تجهيزها: {ostatus}",
+                _s, _s, _s)
+    if not auto_make:
+        return (ws, path, st, preview, _s, _s, _s, _s,
+                f"📥 وصلت صورة جديدة من الكاميرا: {name} — {ostatus}",
+                nzoom, npanx, npany)
+    ez, epx, epy = zoom, pan_x, pan_y
+    if st.get("init"):
+        ez, epx, epy = st["init"]
+    try:
+        m = make_id_photo(path, st, mode, size_label, cw, ch, color_label,
+                          custom_color, sheet_label, align_face, kb, angle,
+                          ez, epx, epy, bright, contrast, satur, sharp,
+                          shadows, highlights, temp)
+        status = f"📥 صورة جديدة من الكاميرا ({name}) — صُنعت تلقائياً ✓\n{m[4]}"
+        return (ws, path, st, preview, m[0], m[1], m[2], m[3], status,
+                nzoom, npanx, npany)
+    except gr.Error as e:
+        msg = getattr(e, "message", None) or str(e)
+        return (ws, path, st, preview, _s, _s, _s, _s,
+                f"📥 وصلت صورة ({name}) لكن تعذّر صنعها تلقائياً: {msg}",
+                nzoom, npanx, npany)
+    except Exception as e:
+        return (ws, path, st, preview, _s, _s, _s, _s,
+                f"📥 وصلت صورة ({name}) وحدث خطأ أثناء الصنع التلقائي: {e}",
+                nzoom, npanx, npany)
+
+
+def list_printers():
+    """أسماء الطابعات المثبتة (ويندوز فقط — عبر PowerShell)."""
+    if os.name != "nt":
+        return []
+    try:
+        import subprocess
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Get-Printer | Select-Object -ExpandProperty Name"],
+                           capture_output=True, text=True, timeout=25,
+                           encoding="utf-8", errors="replace")
+        return [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+    except Exception:
+        return []
+
+
+def _pick_result(files, want_sheet):
+    paths = []
+    for f in (files or []):
+        p = f.get("path") if isinstance(f, dict) else str(f)
+        if p:
+            paths.append(p)
+    if not paths:
+        return None
+    for p in paths:
+        b = os.path.basename(p).lower()
+        if want_sheet and b.startswith("sheet"):
+            return p
+        if not want_sheet and b.startswith("photo") and not b.endswith("_hd.jpg"):
+            return p
+    return paths[-1] if want_sheet else paths[0]
+
+
+def direct_print(files, printer, want_sheet, sheet_label):
+    """
+    طباعة مباشرة صامتة على طابعة الحاسوب (ويندوز): تُنفَّذ على الخادم نفسه،
+    فتعمل حتى لو ضغط الزر من متصفح الهاتف — بالمقاس الحقيقي عبر print_sheet.ps1.
+    """
+    if os.name != "nt":
+        return "الطباعة المباشرة الصامتة تعمل على ويندوز فقط — شغّل البرنامج على حاسوب الويندوز."
+    target = _pick_result(files, want_sheet)
+    if not target or not os.path.isfile(target):
+        return "اصنع صورة الهوية أولاً — لا يوجد ملف نتيجة جاهز للطباعة بعد."
+    ps1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print_sheet.ps1")
+    if not os.path.isfile(ps1):
+        return "ملف الطباعة print_sheet.ps1 غير موجود — ضعه بجانب app.py في نفس المجلد."
+    if want_sheet and sheet_label and "15 × 20" in sheet_label:
+        pw, ph, mode = 203.2, 152.4, "fill"
+    elif want_sheet:
+        pw, ph, mode = 152.4, 101.6, "fill"
+    else:
+        pw, ph, mode = 152.4, 101.6, "exact"
+    try:
+        import subprocess
+        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                            "-File", ps1, "-Path", target,
+                            "-Printer", printer or "",
+                            "-PaperW", str(pw), "-PaperH", str(ph), "-Mode", mode],
+                           capture_output=True, text=True, timeout=120,
+                           encoding="utf-8", errors="replace")
+        out = (r.stdout or "").strip()
+        err = (r.stderr or "").strip()
+        if r.returncode == 0 and "OK" in out:
+            kind = "الورقة المقسمة" if want_sheet else "الصورة"
+            return (f"🖨 أُرسلت {kind} إلى الطابعة ({printer or 'الافتراضية'}) "
+                    f"— تُطبع الآن بالمقاس الحقيقي بلا أي نافذة.")
+        return f"تعذّرت الطباعة المباشرة: {err or out or 'خطأ غير معروف من الطابعة'}"
+    except Exception as e:
+        return f"تعذّرت الطباعة المباشرة: {e}"
+
+
 PRINT_SHEET_JS = ("(files, sheetLabel, sizeLabel, cwMm, chMm) => {" +
                   _PRINT_BODY.replace("FILTER_EXPR", "f => nm(f).includes('sheet_')")
                              .replace("CSS_EXPR", _SHEET_CSS) + "}")
@@ -790,6 +955,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     """)
 
     state = gr.State(None)
+    watch_state = gr.State({"loaded": None, "pending": None, "pending_size": -1})
 
     with gr.Row():
         # ======== لوحة التحكم (يمين الشاشة) ========
@@ -847,6 +1013,23 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     print_sheet_btn = gr.Button("🖨 طباعة الورقة المقسمة", size="sm")
                 gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة».")
 
+            with gr.Accordion("📥 الاستوديو — الكاميرا والهاتف والطباعة المباشرة", open=False):
+                inbox_txt = gr.Textbox(label="مجلد استقبال صور الكاميرا (نفس مجلد وجهة EOS Utility)",
+                                       value=S["inbox"], placeholder="مثال: D:\\Studio\\Incoming")
+                watch_chk = gr.Checkbox(label="مراقبة المجلد — تحميل أي صورة جديدة تلقائياً", value=S["watch"])
+                automake_chk = gr.Checkbox(label="صنع صورة الهوية تلقائياً فور وصول صورة جديدة", value=S["automake"])
+                printer_dd = gr.Dropdown(choices=list_printers(), value=(S["printer"] or None),
+                                         label="طابعة الطباعة المباشرة", allow_custom_value=True)
+                with gr.Row():
+                    refresh_printers_btn = gr.Button("🔄 تحديث الطابعات", size="sm")
+                    direct_sheet_btn = gr.Button("🖨 طباعة الورقة مباشرة", size="sm")
+                    direct_photo_btn = gr.Button("🖨 طباعة الصورة مباشرة", size="sm")
+                gr.Markdown(
+                    "📱 **من هاتفك** (على نفس شبكة وايفاي المحل): افتح في المتصفح "
+                    f"`http://{_lan_ip() or 'عنوان-IP-الحاسوب'}:7860` (المنفذ قد يكون 7861 إن كان 7860 مشغولاً). "
+                    "عند أول تشغيل اسمح لبايثون في جدار حماية ويندوز (شبكة خاصة Private). "
+                    "أزرار «طباعة مباشرة» تطبع على طابعة الحاسوب بصمت وبالمقاس الحقيقي — حتى لو ضغطتها من الهاتف.")
+
             make_btn = gr.Button("اصنع صورة الهوية", variant="primary", elem_id="make-btn")
 
         # ======== النتائج: ثلاث صور فقط ========
@@ -861,11 +1044,13 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     SETTINGS_KEYS = ["mode", "size", "custom_w", "custom_h", "color", "custom_color",
                      "sheet", "align", "angle", "zoom", "pan_x", "pan_y", "guides",
                      "brightness", "contrast", "saturation", "sharpness",
-                     "shadows", "highlights", "temperature"]
+                     "shadows", "highlights", "temperature",
+                     "inbox", "watch", "automake", "printer"]
     SETTINGS_INPUTS = [mode_radio, size_radio, custom_w, custom_h, color_radio,
                        custom_color, sheet_radio, align_chk, angle_slider,
                        zoom_slider, pan_x, pan_y, guides_chk, bright_s, contrast_s,
-                       satur_s, sharp_s, shadows_s, highlights_s, temp_s]
+                       satur_s, sharp_s, shadows_s, highlights_s, temp_s,
+                       inbox_txt, watch_chk, automake_chk, printer_dd]
 
     def _persist(*vals):
         save_settings_dict(dict(zip(SETTINGS_KEYS, vals)))
@@ -961,6 +1146,29 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     print_sheet_btn.click(None, inputs=[out_files, sheet_radio,
                                         size_radio, custom_w, custom_h], js=PRINT_SHEET_JS)
 
+    # ---------- الاستوديو: طباعة مباشرة + مراقبة المجلد ----------
+    refresh_printers_btn.click(lambda: gr.update(choices=list_printers()),
+                               inputs=None, outputs=printer_dd)
+
+    def _dprint_sheet(files, printer, sheet_label):
+        return direct_print(files, printer, True, sheet_label)
+
+    def _dprint_photo(files, printer):
+        return direct_print(files, printer, False, None)
+
+    direct_sheet_btn.click(_dprint_sheet, inputs=[out_files, printer_dd, sheet_radio],
+                           outputs=out_status)
+    direct_photo_btn.click(_dprint_photo, inputs=[out_files, printer_dd],
+                           outputs=out_status)
+
+    watch_timer = gr.Timer(1.5)
+    watch_timer.tick(
+        watch_tick,
+        inputs=[watch_state, inbox_txt, watch_chk, automake_chk, in_image,
+                mode_radio, sheet_radio, align_chk, kb_num] + PREVIEW_INPUTS,
+        outputs=[watch_state, in_image, state, out_preview, out_std, out_hd,
+                 out_sheet, out_files, out_status, zoom_slider, pan_x, pan_y])
+
     gr.HTML("""
     <p style="text-align:center;color:#888;font-size:12px">
       مبني على محرك <a href="https://github.com/Zeyi-Lin/HivisionIDPhotos" target="_blank">HivisionIDPhotos</a>
@@ -984,6 +1192,15 @@ if __name__ == "__main__":
                     continue
         return start
 
-    demo.launch(inbrowser=True, server_name="127.0.0.1", server_port=_free_port(),
+    # الشبكة المحلية مفتوحة (0.0.0.0) ليصل الهاتف على نفس الوايفاي إلى اللوحة.
+    # كلمة سر اختيارية: عيّن متغير البيئة PHOTOID_AUTH على صورة user:pass قبل التشغيل.
+    _auth = None
+    _ea = os.environ.get("PHOTOID_AUTH", "")
+    if ":" in _ea:
+        _u, _pw = _ea.split(":", 1)
+        _auth = (_u, _pw)
+    print("الهاتف (نفس الوايفاي): http://" + str(_lan_ip()) + ":<المنفذ الظاهر أسفله>")
+    demo.launch(inbrowser=True, server_name="0.0.0.0", server_port=_free_port(),
+                auth=_auth,
                 theme=gr.themes.Soft(primary_hue="emerald", neutral_hue="slate"),
                 css=CUSTOM_CSS)
