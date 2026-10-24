@@ -94,7 +94,8 @@ DEFAULT_SETTINGS = {
     "shadows": 0, "highlights": 0, "temperature": 0,
     "inbox": "", "watch": False, "automake": False, "printer": "",
     "ui_cut": True, "ui_color": False, "ui_paper": False,
-    "ui_studio": False, "ui_list": True,
+    "ui_studio": False, "ui_list": True, "ui_layout": False,
+    "layout_page": 100, "layout_split": 40, "layout_listh": 340,
 }
 
 
@@ -1293,7 +1294,31 @@ CUSTOM_CSS = """
 .section-head button { justify-content: flex-start; font-weight: 700; font-size: 15px; }
 #make-btn { font-size: 19px !important; padding: 14px !important; }
 footer { display: none !important; }
+.gradio-container { max-width: var(--pagew, 100%) !important; margin-left: auto !important; margin-right: auto !important; }
+@media (min-width: 900px) {
+  #col_results { flex: 0 0 var(--wres, 40%) !important; max-width: var(--wres, 40%) !important; min-width: 300px; }
+  #col_controls { flex: 1 1 0% !important; min-width: 330px; }
+}
+#photo_list_box { max-height: var(--listh, 340px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #0d9488 #1e293b; }
+#photo_list_box::-webkit-scrollbar { width: 10px; }
+#photo_list_box::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
+#photo_list_box::-webkit-scrollbar-thumb { background: #0d9488; border-radius: 6px; }
+#layout_style { display: none; }
 """
+
+def _layout_style(page, split, listh):
+    """ستايل مقاسات الواجهة (متغيرات CSS) من قيم آمنة مضغوطة ضمن حدود."""
+    def _cl(v, lo, hi, dflt):
+        try:
+            return min(hi, max(lo, float(v)))
+        except Exception:
+            return dflt
+    page = _cl(page, 50, 100, 100)
+    split = _cl(split, 20, 70, 40)
+    listh = _cl(listh, 120, 1200, 340)
+    return (f"<style>:root{{--pagew:{page:g}%;--wres:{split:g}%;"
+            f"--listh:{listh:g}px}}</style>")
+
 
 S = SETTINGS
 
@@ -1305,6 +1330,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     </div>
     """)
 
+    layout_style = gr.HTML("", elem_id="layout_style")
     state = gr.State(None)
     watch_state = gr.State({"present": {}, "pending": {}, "seeded": False})
     photos_state = gr.State({"photos": db_list(), "notifs": []})
@@ -1323,7 +1349,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
     with gr.Row():
         # ======== لوحة التحكم (يمين الشاشة) ========
-        with gr.Column(scale=6):
+        with gr.Column(scale=6, elem_id="col_controls"):
             in_image = gr.Image(label="١ — ارفع صورتك", type="filepath",
                                 sources=["upload", "webcam"], height=280)
             mode_radio = gr.Radio(MODES, value=S["mode"], label="٢ — وضع العمل")
@@ -1393,16 +1419,30 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     direct_sheet_btn = gr.Button("🖨 طباعة الورقة مباشرة", size="sm")
                     direct_photo_btn = gr.Button("🖨 طباعة الصورة مباشرة", size="sm")
 
+            layout_head = gr.Button(_sec_label("📐 الواجهة والمقاسات", S["ui_layout"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_layout"]) as layout_group:
+                layout_page = gr.Slider(60, 100, value=S["layout_page"], step=1,
+                                        label="عرض الصفحة على الشاشة (%) — 100 يعني ملء الشاشة بلا فراغات جانبية")
+                layout_split = gr.Slider(25, 65, value=S["layout_split"], step=1,
+                                         label="عرض عمود النتائج — الصور والقائمة (%) — الباقي يذهب للإعدادات")
+                layout_listh = gr.Slider(160, 800, value=S["layout_listh"], step=20,
+                                         label="ارتفاع قائمة الصور (بكسل) — القائمة بداخلها سكرول")
+                gr.Markdown("تتطبق المقاسات فوراً أثناء السحب وتُحفظ تلقائياً — تحديث الصفحة لا يغيّرها.")
+
             make_btn = gr.Button("اصنع صورة الهوية", variant="primary", elem_id="make-btn")
             with gr.Row():
                 save_settings_btn = gr.Button("💾 احفظ إعداداتي", size="sm")
                 reset_settings_btn = gr.Button("↩️ إعادة ضبط الإعدادات", size="sm")
 
         # ======== النتائج: ثلاث صور فقط ========
-        with gr.Column(scale=4):
+        with gr.Column(scale=4, elem_id="col_results"):
             list_head = gr.Button(_sec_label("🗂 قائمة الصور الواصلة", S["ui_list"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_list"]) as list_group:
                 photo_rows = []
+              # (الصفوف تُنشأ داخل صندوق التمرير أدناه)
+              # fmt: off
+                _rows_ctx = gr.Column(elem_id="photo_list_box")
+                _rows_ctx.__enter__()
                 for _j in range(LIST_ROWS):
                     with gr.Group(visible=False) as _rg:
                         _rmd = gr.Markdown("")
@@ -1410,6 +1450,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                             _rb8 = gr.Button("⚡ تجهيز 8 صور + طبع", size="sm", variant="primary")
                             _rb12 = gr.Button("⚡ تجهيز 12 صورة + طبع", size="sm")
                     photo_rows.append((_rg, _rmd, _rb8, _rb12))
+                _rows_ctx.__exit__(None, None, None)
                 gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة.")
 
             out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=330)
@@ -1423,12 +1464,14 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                      "sheet", "align", "angle", "zoom", "pan_x", "pan_y", "guides",
                      "brightness", "contrast", "saturation", "sharpness",
                      "shadows", "highlights", "temperature",
-                     "inbox", "watch", "automake", "printer"]
+                     "inbox", "watch", "automake", "printer",
+                     "layout_page", "layout_split", "layout_listh"]
     SETTINGS_INPUTS = [mode_radio, size_radio, custom_w, custom_h, color_radio,
                        custom_color, sheet_radio, align_chk, angle_slider,
                        zoom_slider, pan_x, pan_y, guides_chk, bright_s, contrast_s,
                        satur_s, sharp_s, shadows_s, highlights_s, temp_s,
-                       inbox_txt, watch_chk, automake_chk, printer_dd]
+                       inbox_txt, watch_chk, automake_chk, printer_dd,
+                       layout_page, layout_split, layout_listh]
 
     def _persist(*vals):
         save_settings_dict(dict(zip(SETTINGS_KEYS, vals)))
@@ -1442,7 +1485,8 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     ("ui_paper", paper_head, paper_group, "🖨 الورقة والطباعة"),
                     ("ui_studio", studio_head, studio_group,
                      "📥 الاستوديو — الكاميرا والهاتف والطباعة المباشرة"),
-                    ("ui_list", list_head, list_group, "🗂 قائمة الصور الواصلة")]
+                    ("ui_list", list_head, list_group, "🗂 قائمة الصور الواصلة"),
+                    ("ui_layout", layout_head, layout_group, "📐 الواجهة والمقاسات")]
     SECTION_OUTS = []
     for _k, _h, _g, _t in SECTION_DEFS:
         SECTION_OUTS += [_g, _h]
@@ -1465,6 +1509,14 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
     for _k, _h, _g, _t in SECTION_DEFS:
         _h.click(_mk_toggle(_k, _t), inputs=None, outputs=[_g, _h])
+
+    def _apply_layout(page, split, listh):
+        return gr.update(value=_layout_style(page, split, listh))
+
+    for _lc in (layout_page, layout_split, layout_listh):
+        _lc.change(_apply_layout,
+                   inputs=[layout_page, layout_split, layout_listh],
+                   outputs=layout_style)
 
     # ---------- مخرجات الإشعارات وقائمة الصور ----------
     DYN_OUTPUTS = [photos_state]
@@ -1656,6 +1708,10 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         return (*_settings_values(dict(DEFAULT_SETTINGS)),
                 gr.update(visible=vis), gr.update(visible=vis),
                 *_section_updates(dict(DEFAULT_SETTINGS)),
+                gr.update(value=_layout_style(
+                    DEFAULT_SETTINGS["layout_page"],
+                    DEFAULT_SETTINGS["layout_split"],
+                    DEFAULT_SETTINGS["layout_listh"])),
                 "↩️ تمت إعادة ضبط كل الإعدادات إلى قيمها الأصلية.")
 
     def _load_saved():
@@ -1664,15 +1720,18 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         return (*_settings_values(s),
                 gr.update(visible=vis), gr.update(visible=vis),
                 *_section_updates(s),
-                *render_dynamic({"photos": db_list(), "notifs": []}))
+                *render_dynamic({"photos": db_list(), "notifs": []}),
+                gr.update(value=_layout_style(s.get("layout_page", 100),
+                                              s.get("layout_split", 40),
+                                              s.get("layout_listh", 340))))
 
     save_settings_btn.click(_save_now, inputs=SETTINGS_INPUTS, outputs=out_status)
     reset_settings_btn.click(_reset_now, inputs=None,
                              outputs=SETTINGS_INPUTS + [out_preview, guide_md]
-                                     + SECTION_OUTS + [out_status])
+                                     + SECTION_OUTS + [layout_style, out_status])
     demo.load(_load_saved, inputs=None,
               outputs=SETTINGS_INPUTS + [out_preview, guide_md] + SECTION_OUTS
-                      + DYN_OUTPUTS)
+                      + DYN_OUTPUTS + [layout_style])
 
     gr.HTML("""
     <p style="text-align:center;color:#888;font-size:12px">
