@@ -966,7 +966,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
             out_preview = gr.Image(label="معاينة العمل (الأدلة هنا فقط — لا تظهر في النتائج أبداً)",
                                    type="numpy", interactive=False, height=330,
                                    visible=(S["mode"] == MODES[1]))
-            gr.Markdown(
+            guide_md = gr.Markdown(
                 "دليل الأدلة (كما في القوالب المعتمدة): الأسهم الخضراء حول الصورة = الارتفاع والعرض الكليان، "
                 "وموضع الذقن من الأعلى، وبعد العينين عن الأسفل — بالمليمتر مع مجال التسامح. "
                 "وعلى الصورة: ضع قمة الرأس عند المنطقة الحمراء، والذقن عند الخط الأخضر، والعينين داخل الشريط الأزرق.",
@@ -1031,6 +1031,9 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     "أزرار «طباعة مباشرة» تطبع على طابعة الحاسوب بصمت وبالمقاس الحقيقي — حتى لو ضغطتها من الهاتف.")
 
             make_btn = gr.Button("اصنع صورة الهوية", variant="primary", elem_id="make-btn")
+            with gr.Row():
+                save_settings_btn = gr.Button("💾 احفظ إعداداتي", size="sm")
+                reset_settings_btn = gr.Button("↩️ إعادة ضبط الإعدادات", size="sm")
 
         # ======== النتائج: ثلاث صور فقط ========
         with gr.Column(scale=4):
@@ -1168,6 +1171,42 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 mode_radio, sheet_radio, align_chk, kb_num] + PREVIEW_INPUTS,
         outputs=[watch_state, in_image, state, out_preview, out_std, out_hd,
                  out_sheet, out_files, out_status, zoom_slider, pan_x, pan_y])
+
+    # ---------- حفظ/استرجاع الإعدادات ----------
+    # المشكلة التي أزعجت المستخدم: قيم البداية تتجمّد لحظة إقلاع الخادم، فكل
+    # تحديث للصفحة كان يعرض قيم الإقلاع لا آخر ما حُفظ. الحل: عند كل تحميل
+    # للصفحة (demo.load) نعيد قراءة settings.json ونملأ المكوّنات من جديد،
+    # + زر حفظ صريح يلتقط حتى الحقول النصية التي لم يُضغط خارجها بعد.
+    def _settings_values(s):
+        vals = [s[k] for k in SETTINGS_KEYS]
+        vals[SETTINGS_KEYS.index("printer")] = \
+            vals[SETTINGS_KEYS.index("printer")] or None
+        return vals
+
+    def _save_now(*vals):
+        save_settings_dict(dict(zip(SETTINGS_KEYS, vals)))
+        return ("💾 تم حفظ إعداداتك ✓ — ستبقى كما هي بعد تحديث الصفحة "
+                "أو إعادة فتح البرنامج أو من هاتفك.")
+
+    def _reset_now():
+        save_settings_dict(dict(DEFAULT_SETTINGS))
+        vis = DEFAULT_SETTINGS["mode"] == MODES[1]
+        return (*_settings_values(dict(DEFAULT_SETTINGS)),
+                gr.update(visible=vis), gr.update(visible=vis),
+                "↩️ تمت إعادة ضبط كل الإعدادات إلى قيمها الأصلية.")
+
+    def _load_saved():
+        s = load_settings()
+        vis = s["mode"] == MODES[1]
+        return (*_settings_values(s),
+                gr.update(visible=vis), gr.update(visible=vis))
+
+    save_settings_btn.click(_save_now, inputs=SETTINGS_INPUTS, outputs=out_status)
+    reset_settings_btn.click(_reset_now, inputs=None,
+                             outputs=SETTINGS_INPUTS + [out_preview, guide_md,
+                                                        out_status])
+    demo.load(_load_saved, inputs=None,
+              outputs=SETTINGS_INPUTS + [out_preview, guide_md])
 
     gr.HTML("""
     <p style="text-align:center;color:#888;font-size:12px">
