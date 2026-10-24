@@ -24,8 +24,7 @@ import json
 import datetime
 import numpy as np
 import cv2
-import io
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageCms
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 import gradio as gr
 
 from hivision import IDCreator
@@ -65,8 +64,8 @@ COLORS = {
 
 SHEETS = {
     "بدون ورقة طباعة": None,
-    "8 صور — ورقة 10 × 15 سم": ((1772, 1181), 4, 2),   # (عرض، ارتفاع) الورقة، أعمدة، صفوف
-    "12 صورة — ورقة 15 × 20 سم": ((2362, 1772), 4, 3),
+    "8 صور — ورقة 10 × 15 سم": ((1795, 1205), 4, 2),   # ورق المختبر الحقيقي 6×4 بوصة (152×102مم) عند 300 DPI
+    "12 صورة — ورقة 15 × 20 سم": ((2400, 1800), 4, 3),  # ورق المختبر الحقيقي 8×6 بوصة (203×152مم) عند 300 DPI
 }
 
 MODES = ["تلقائي — كشف الوجه والقص الذكي", "يدوي — أنا أضبط القص بنفسي"]
@@ -174,45 +173,20 @@ def resolve_color(color_label, custom_color):
 def normalize_input(img) -> np.ndarray:
     """
     تحويل الصورة المرفوعة إلى BGR بثلاث قنوات — وهو ما يتوقعه المحرك.
-    عند استلام مسار ملف (وهو الحال من الواجهة): فك ترميز واعٍ بالألوان —
-    احترام ملف تعريف الألوان المضمّن (ICC) بتحويله إلى sRGB كما تفعل
-    المتصفحات وعارضات الصور (صور آيفون P3 وكاميرات AdobeRGB تنحرف ألوانها
-    بدونه)، وتطبيق اتجاه EXIF. الصور الشفافة تُدمج على أبيض أولاً.
+    عند استلام مسار ملف (وهو الحال من الواجهة): فك ترميز يحفظ قيم البكسل
+    حرفياً كما تفعل برامج صور الهوية الاحترافية (لا تحويلات فضاء ألوان —
+    الألوان تبقى كما في الملف تماماً)، مع تطبيق اتجاه EXIF. الصور الشفافة
+    تُدمج على أبيض أولاً.
     """
     if img is None:
         return None
     if isinstance(img, (str, os.PathLike)):
         pil = Image.open(img)
         pil = ImageOps.exif_transpose(pil)
-        prof = None
-        icc = pil.info.get("icc_profile")
-        if icc:
-            try:
-                _p = ImageCms.ImageCmsProfile(io.BytesIO(icc))
-                if "srgb" not in (ImageCms.getProfileName(_p) or "").lower():
-                    prof = _p
-            except Exception:
-                prof = None
-        has_alpha = pil.mode in ("RGBA", "LA") or (pil.mode == "P" and "transparency" in pil.info)
-        if has_alpha:
+        if pil.mode in ("RGBA", "LA") or (pil.mode == "P" and "transparency" in pil.info):
             rgba = pil.convert("RGBA")
-            if prof is not None:
-                try:
-                    _rgb = ImageCms.profileToProfile(rgba.convert("RGB"), prof,
-                                                     ImageCms.createProfile("sRGB"),
-                                                     outputMode="RGB")
-                    rgba = Image.merge("RGBA", (*_rgb.split(), rgba.split()[3]))
-                except Exception:
-                    pass
             white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
             pil = Image.alpha_composite(white, rgba).convert("RGB")
-        elif prof is not None:
-            try:
-                pil = ImageCms.profileToProfile(pil, prof,
-                                                 ImageCms.createProfile("sRGB"),
-                                                 outputMode="RGB")
-            except Exception:
-                pil = pil.convert("RGB")
         else:
             pil = pil.convert("RGB")
         img = np.array(pil)
@@ -245,7 +219,7 @@ def finalize_from_crop(crop_bgra: np.ndarray, target_w: int, target_h: int, rgb)
 
 def mild_sharpen(img: Image.Image) -> Image.Image:
     """تحسين حدة خفيف قياسي (قناع إزالة ضباب) — يعيد للتفاصيل حضورها بعد التصغير."""
-    return img.filter(ImageFilter.UnsharpMask(radius=2, percent=55, threshold=2))
+    return img.filter(ImageFilter.UnsharpMask(radius=2, percent=40, threshold=3))
 
 
 def apply_color_adjustments(img: Image.Image, brightness=1.0, contrast=1.0,
@@ -308,11 +282,16 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignmen
         ctx = creator.ctx
         if ctx is None or ctx.face is None or ctx.face.get("rectangle") is None:
             return None
-        # إن دوّر المحرك الصورة داخلياً لتصحيح ميلان كبير، تختلف الهندسة — نتراجع بأمان
         roll = ctx.face.get("roll_angle") or 0
+        base_bgr = orig_bgr
         if face_alignment and abs(roll) > 2:
-            return None
-        virt = build_virtual_bgra(orig_bgr, ctx.matting_image)
+            # المحرك دوّر صورته داخلياً لتصحيح الميلان: ندوّر الأصلية كاملة الدقة
+            # بنفس الزاوية والأداة حتى تبقى الهندسة متطابقة ويعمل مسار HQ
+            # (سابقاً كانت الصور المائلة الرأس تسقط إلى مسار مصغّر ضبابي)
+            from hivision.creator.rotation_adjust import rotate_bound_4channels
+            _alpha = np.full(orig_bgr.shape[:2], 255, dtype=np.uint8)
+            base_bgr = rotate_bound_4channels(orig_bgr, _alpha, -1 * roll)[0]
+        virt = build_virtual_bgra(base_bgr, ctx.matting_image)
         if virt is None:
             return None
         ch, cw = ctx.origin_image.shape[:2]
@@ -468,19 +447,19 @@ def draw_guides(img: Image.Image) -> Image.Image:
 
 def save_jpg(img: Image.Image, path: str, target_kb: float = 0) -> str:
     """
-    حفظ JPG بأعلى جودة (97 وبدون تخفيض ألوان 4:4:4) مع ختم 300 DPI.
+    حفظ JPG بأعلى جودة (100 وبدون تخفيض ألوان 4:4:4) مع ختم 300 DPI.
     عند طلب حجم مستهدف: تخفيض تدريجي للجودة حتى الوصول إليه.
     """
     if target_kb and target_kb > 0:
         limit = float(target_kb) * 1024
-        quality = 97
+        quality = 100
         while True:
             img.save(path, "JPEG", quality=quality, subsampling=0, dpi=(DPI, DPI))
             if os.path.getsize(path) <= limit or quality <= 35:
                 break
             quality -= 6
     else:
-        img.save(path, "JPEG", quality=97, subsampling=0, dpi=(DPI, DPI))
+        img.save(path, "JPEG", quality=100, subsampling=0, dpi=(DPI, DPI))
     return path
 
 
@@ -770,7 +749,7 @@ _PRINT_BODY = """
 """
 
 _SHEET_CSS = """
-  const size = sheetLabel.includes('15 × 20') ? '20cm 15cm' : '15cm 10cm';
+  const size = sheetLabel.includes('15 × 20') ? '20.32cm 15.24cm' : '15.24cm 10.16cm';
   css = '@page { size: ' + size + '; margin: 0; } body { margin: 0; } img { width: 100%; display: block; }';
 """
 
