@@ -68,6 +68,9 @@ SHEETS = {
     "12 صورة — ورقة 15 × 20 سم": ((2400, 1800), 4, 3),  # ورق المختبر الحقيقي 8×6 بوصة (203×152مم) عند 300 DPI
 }
 
+NOTIF_SLOTS = 3   # إشعارات ظاهرة في نفس الوقت كحد أقصى
+LIST_ROWS = 6     # صور ظاهرة في قائمة الصور كحد أقصى
+
 MODES = ["تلقائي — كشف الوجه والقص الذكي", "يدوي — أنا أضبط القص بنفسي"]
 
 # معاملات القص القياسية (قيم المحرك المُختبَرة على 8 بورتريهات: ذقن ≈ 71.6%،
@@ -89,6 +92,8 @@ DEFAULT_SETTINGS = {
     "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "sharpness": 1.0,
     "shadows": 0, "highlights": 0, "temperature": 0,
     "inbox": "", "watch": False, "automake": False, "printer": "",
+    "ui_cut": True, "ui_color": False, "ui_paper": False,
+    "ui_studio": False, "ui_list": True,
 }
 
 
@@ -765,6 +770,57 @@ _PHOTO_CSS = """
 
 # ===================== الاستوديو: مراقبة المجلد + طباعة مباشرة =====================
 
+
+def _sec_label(title, opened):
+    return ("▼ " if opened else "◀ ") + title
+
+
+def clean_folder(p):
+    """تنظيف مسار مجلد منسوخ من ويندوز (نسخ كمسار يضيف علامتي تنصيص)."""
+    if not p:
+        return ""
+    return str(p).strip().strip('"').strip().strip("'")
+
+
+def register_photo(pd, path):
+    """تسجيل صورة واصلة في القائمة + إشعار يعيش 30 ثانية."""
+    now = datetime.datetime.now()
+    rec = next((x for x in pd["photos"] if x["path"] == path), None)
+    if rec is not None:
+        pd["photos"].remove(rec)
+        rec.update({"time": now.strftime("%H:%M"), "printed": False, "made": False})
+    else:
+        rec = {"path": path, "name": os.path.basename(path),
+               "time": now.strftime("%H:%M"), "printed": False, "made": False}
+    pd["photos"].insert(0, rec)
+    pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != path]
+    pd["notifs"].append({"pid": path, "expires": now.timestamp() + 30})
+
+
+def render_dynamic(pd):
+    """بناء تحديثات الإشعارات وقائمة الصور من الحالة (قيم فقط — بلا مكوّنات)."""
+    pd = pd or {"photos": [], "notifs": []}
+    photos, notifs = pd.get("photos", []), pd.get("notifs", [])
+    out = [pd]
+    for i in range(NOTIF_SLOTS):
+        if i < len(notifs):
+            rec = next((x for x in photos if x["path"] == notifs[i]["pid"]), None)
+            nm = rec["name"] if rec else "صورة"
+            tm = rec["time"] if rec else ""
+            out += [gr.update(visible=True),
+                    gr.update(value=f"📸 **صورة جديدة وصلت** — {nm}  \n🕒 {tm}")]
+        else:
+            out += [gr.update(visible=False), gr.update(value="")]
+    for j in range(LIST_ROWS):
+        if j < len(photos):
+            p = photos[j]
+            chip = "🟢 **تمت طباعتها**" if p.get("printed") else "🔴 **لم تُطبع بعد**"
+            out += [gr.update(visible=True),
+                    gr.update(value=f"**{p['name']}** — 🕒 {p['time']} — {chip}")]
+        else:
+            out += [gr.update(visible=False), gr.update(value="")]
+    return tuple(out)
+
 def newest_inbox_image(folder):
     """أحدث صورة (JPG/PNG) في مجلد الاستقبال، أو None."""
     try:
@@ -795,32 +851,43 @@ def _lan_ip():
         return None
 
 
-def watch_tick(wstate, inbox_dir, watch_on, auto_make, cur_img, mode,
+def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
                sheet_label, align_face, kb,
                angle, zoom, pan_x, pan_y, size_label, cw, ch,
                color_label, custom_color, guides,
                bright, contrast, satur, sharp, shadows, highlights, temp):
     """
-    نبضة المؤقّت (كل ~1.5 ثانية): إن ظهرت صورة جديدة مستقرة الحجم في مجلد
-    الاستقبال (أي انتهت كتابتها من برنامج الكاميرا)، حمّلها كما لو رُفعت
-    يدوياً — واصنع صورة الهوية تلقائياً إن فعّل المستخدم ذلك.
+    نبضة المؤقّت (كل ~1.5 ثانية): صورة جديدة مستقرة الحجم في مجلد الاستقبال
+    تُحمّل كما لو رُفعت يدوياً (+ صنع تلقائي اختياري)، وتُسجَّل في قائمة
+    الصور مع إشعار يعيش 30 ثانية. الإشعارات المنتهية تُخفى في أي نبضة.
     """
     _s = gr.skip()
     SKIP12 = (_s,) * 12
-    if not watch_on or not inbox_dir or not os.path.isdir(str(inbox_dir).strip()):
-        return SKIP12
+    SKIPDYN = (_s,) * (1 + NOTIF_SLOTS * 2 + LIST_ROWS * 2)
+    pd = {"photos": list((photos or {}).get("photos", [])),
+          "notifs": list((photos or {}).get("notifs", []))}
+    now_ts = datetime.datetime.now().timestamp()
+    kept = [n for n in pd["notifs"] if n.get("expires", 0) > now_ts]
+    dyn_changed = len(kept) != len(pd["notifs"])
+    pd["notifs"] = kept
+    dyn = render_dynamic(pd) if dyn_changed else SKIPDYN
+    folder = clean_folder(inbox_dir)
+    if not watch_on or not folder or not os.path.isdir(folder):
+        return SKIP12 + dyn
     ws = dict(wstate or {})
-    path = newest_inbox_image(str(inbox_dir).strip())
+    path = newest_inbox_image(folder)
     if path is None or path == ws.get("loaded"):
-        return SKIP12
+        return SKIP12 + dyn
     try:
         size = os.path.getsize(path)
     except OSError:
-        return SKIP12
+        return SKIP12 + dyn
     if ws.get("pending") != path or ws.get("pending_size") != size:
         ws["pending"], ws["pending_size"] = path, size
-        return (ws,) + (_s,) * 11
+        return (ws,) + (_s,) * 11 + dyn
     ws["loaded"] = path
+    register_photo(pd, path)
+    dyn = render_dynamic(pd)
     preview_vals = [angle, zoom, pan_x, pan_y, size_label, cw, ch,
                     color_label, custom_color, guides,
                     bright, contrast, satur, sharp, shadows, highlights, temp]
@@ -829,11 +896,11 @@ def watch_tick(wstate, inbox_dir, watch_on, auto_make, cur_img, mode,
     if st is None:
         return (ws, path, None, None, _s, _s, _s, _s,
                 f"📥 وصلت صورة جديدة ({name}) لكن تعذّر تجهيزها: {ostatus}",
-                _s, _s, _s)
+                _s, _s, _s) + dyn
     if not auto_make:
         return (ws, path, st, preview, _s, _s, _s, _s,
                 f"📥 وصلت صورة جديدة من الكاميرا: {name} — {ostatus}",
-                nzoom, npanx, npany)
+                nzoom, npanx, npany) + dyn
     ez, epx, epy = zoom, pan_x, pan_y
     if st.get("init"):
         ez, epx, epy = st["init"]
@@ -843,17 +910,75 @@ def watch_tick(wstate, inbox_dir, watch_on, auto_make, cur_img, mode,
                           ez, epx, epy, bright, contrast, satur, sharp,
                           shadows, highlights, temp)
         status = f"📥 صورة جديدة من الكاميرا ({name}) — صُنعت تلقائياً ✓\n{m[4]}"
+        rec = next((x for x in pd["photos"] if x["path"] == path), None)
+        if rec is not None:
+            rec["made"] = True
+            dyn = render_dynamic(pd)
         return (ws, path, st, preview, m[0], m[1], m[2], m[3], status,
-                nzoom, npanx, npany)
+                nzoom, npanx, npany) + dyn
     except gr.Error as e:
         msg = getattr(e, "message", None) or str(e)
         return (ws, path, st, preview, _s, _s, _s, _s,
                 f"📥 وصلت صورة ({name}) لكن تعذّر صنعها تلقائياً: {msg}",
-                nzoom, npanx, npany)
+                nzoom, npanx, npany) + dyn
     except Exception as e:
         return (ws, path, st, preview, _s, _s, _s, _s,
                 f"📥 وصلت صورة ({name}) وحدث خطأ أثناء الصنع التلقائي: {e}",
-                nzoom, npanx, npany)
+                nzoom, npanx, npany) + dyn
+
+
+def quick_make_print(photos, which, idx, kind, mode, printer, align_face, kb,
+                     *preview_vals):
+    """
+    زر «تجهيز مباشر + طبع»: يجهّز صورة من القائمة/الإشعار بورقة 8 أو 12
+    ويطبعها مباشرة على الطابعة المختارة (تنفيذ على الخادم — يعمل من الهاتف).
+    """
+    _s = gr.skip()
+    pd = {"photos": list((photos or {}).get("photos", [])),
+          "notifs": list((photos or {}).get("notifs", []))}
+    rec = None
+    if which == "slot":
+        if 0 <= idx < len(pd["notifs"]):
+            pid = pd["notifs"][idx]["pid"]
+            rec = next((x for x in pd["photos"] if x["path"] == pid), None)
+    elif 0 <= idx < len(pd["photos"]):
+        rec = pd["photos"][idx]
+    if rec is None:
+        return (pd, _s, _s, _s, _s, _s) + render_dynamic(pd)[1:]
+    sheet_label = ("8 صور — ورقة 10 × 15 سم" if kind == "8"
+                   else "12 صورة — ورقة 15 × 20 سم")
+    try:
+        st, _pv, _ost, _nz, _nx, _ny = on_upload(rec["path"], mode, *preview_vals)
+        if st is None:
+            return (pd, _s, _s, _s, _s,
+                    f"تعذّر تجهيز الصورة {rec['name']} — جرّب صنعها من اللوحة يدوياً.") \
+                + render_dynamic(pd)[1:]
+        ez, epx, epy = preview_vals[1], preview_vals[2], preview_vals[3]
+        if st.get("init"):
+            ez, epx, epy = st["init"]
+        m = make_id_photo(rec["path"], st, mode, preview_vals[4], preview_vals[5],
+                          preview_vals[6], preview_vals[7], preview_vals[8],
+                          sheet_label, align_face, kb, preview_vals[0],
+                          ez, epx, epy, *preview_vals[10:17])
+        status = f"⚡ تجهيز مباشر ({kind} صور) — {rec['name']} ✓\n{m[4]}"
+        rec["made"] = True
+        if printer:
+            pr = direct_print(m[3], printer, True, sheet_label)
+            status += "\n" + pr
+            if pr.startswith("🖨"):
+                rec["printed"] = True
+        else:
+            status += "\n⚠ صُنعت الورقة لكن لم تُطبع: اختر الطابعة أولاً من قسم الاستوديو."
+        if which == "slot":
+            pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != rec["path"]]
+        return (pd, m[0], m[1], m[2], m[3], status) + render_dynamic(pd)[1:]
+    except gr.Error as e:
+        msg = getattr(e, "message", None) or str(e)
+        return (pd, _s, _s, _s, _s,
+                f"⚡ تعذّر التجهيز المباشر لـ{rec['name']}: {msg}") + render_dynamic(pd)[1:]
+    except Exception as e:
+        return (pd, _s, _s, _s, _s,
+                f"⚡ خطأ أثناء التجهيز المباشر لـ{rec['name']}: {e}") + render_dynamic(pd)[1:]
 
 
 def list_printers():
@@ -940,6 +1065,8 @@ CUSTOM_CSS = """
 #app-title { text-align: center; padding: 18px 10px 4px; }
 #app-title h1 { font-size: 30px; margin: 0; color: #0b6b3a; }
 #app-title p { color: #555; margin: 6px 0 0; }
+.section-head { margin-top: 8px; }
+.section-head button { justify-content: flex-start; font-weight: 700; font-size: 15px; }
 #make-btn { font-size: 19px !important; padding: 14px !important; }
 footer { display: none !important; }
 """
@@ -956,6 +1083,19 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
     state = gr.State(None)
     watch_state = gr.State({"loaded": None, "pending": None, "pending_size": -1})
+    photos_state = gr.State({"photos": [], "notifs": []})
+
+    # ======== إشعارات الصور الجديدة (تعيش 30 ثانية) ========
+    notif_slots = []
+    for _i in range(NOTIF_SLOTS):
+        with gr.Group(visible=False) as _ng:
+            _nmd = gr.Markdown("")
+            with gr.Row():
+                _nb8 = gr.Button("⚡ تجهيز مباشر 8 صور + طبع", size="sm", variant="primary")
+                _nb12 = gr.Button("⚡ تجهيز مباشر 12 صورة + طبع", size="sm")
+                _nbh = gr.Button("إخفاء", size="sm")
+        notif_slots.append((_ng, _nmd, _nb8, _nb12, _nbh))
+
 
     with gr.Row():
         # ======== لوحة التحكم (يمين الشاشة) ========
@@ -972,7 +1112,8 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 "وعلى الصورة: ضع قمة الرأس عند المنطقة الحمراء، والذقن عند الخط الأخضر، والعينين داخل الشريط الأزرق.",
                 visible=(S["mode"] == MODES[1]))
 
-            with gr.Accordion("القص والمقاس", open=True):
+            cut_head = gr.Button(_sec_label("✂️ القص والمقاس", S["ui_cut"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_cut"]) as cut_group:
                 size_radio = gr.Radio(list(SIZES.keys()), value=S["size"], label="مقاس الصورة")
                 with gr.Row(visible=(S["size"] == "مقاس مخصص…")) as custom_size_row:
                     custom_w = gr.Number(label="العرض (مم)", value=S["custom_w"], minimum=8, maximum=250)
@@ -996,7 +1137,8 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     center_btn = gr.Button("🎯 توسيط الوجه تلقائياً", size="sm")
                     reset_manual_btn = gr.Button("إعادة ضبط اليدوي", size="sm")
 
-            with gr.Accordion("الألوان والإضاءة", open=False):
+            color_head = gr.Button(_sec_label("🎨 الألوان والإضاءة", S["ui_color"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_color"]) as color_group:
                 bright_s = gr.Slider(0.5, 1.5, value=S["brightness"], step=0.01, label="السطوع")
                 contrast_s = gr.Slider(0.5, 1.5, value=S["contrast"], step=0.01, label="التباين")
                 satur_s = gr.Slider(0, 2.0, value=S["saturation"], step=0.01, label="تشبع الألوان")
@@ -1006,14 +1148,16 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 temp_s = gr.Slider(-50, 50, value=S["temperature"], step=1, label="حرارة اللون (بارد ← دافئ)")
                 reset_color_btn = gr.Button("إعادة ضبط الألوان", size="sm")
 
-            with gr.Accordion("الورقة والطباعة", open=False):
+            paper_head = gr.Button(_sec_label("🖨 الورقة والطباعة", S["ui_paper"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_paper"]) as paper_group:
                 sheet_radio = gr.Radio(list(SHEETS.keys()), value=S["sheet"], label="ورقة الطباعة")
                 with gr.Row():
                     print_photo_btn = gr.Button("🖨 طباعة الصورة", size="sm")
                     print_sheet_btn = gr.Button("🖨 طباعة الورقة المقسمة", size="sm")
                 gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة».")
 
-            with gr.Accordion("📥 الاستوديو — الكاميرا والهاتف والطباعة المباشرة", open=False):
+            studio_head = gr.Button(_sec_label("📥 الاستوديو — الكاميرا والهاتف والطباعة المباشرة", S["ui_studio"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_studio"]) as studio_group:
                 inbox_txt = gr.Textbox(label="مجلد استقبال صور الكاميرا (نفس مجلد وجهة EOS Utility)",
                                        value=S["inbox"], placeholder="مثال: D:\\Studio\\Incoming")
                 watch_chk = gr.Checkbox(label="مراقبة المجلد — تحميل أي صورة جديدة تلقائياً", value=S["watch"])
@@ -1024,11 +1168,6 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     refresh_printers_btn = gr.Button("🔄 تحديث الطابعات", size="sm")
                     direct_sheet_btn = gr.Button("🖨 طباعة الورقة مباشرة", size="sm")
                     direct_photo_btn = gr.Button("🖨 طباعة الصورة مباشرة", size="sm")
-                gr.Markdown(
-                    "📱 **من هاتفك** (على نفس شبكة وايفاي المحل): افتح في المتصفح "
-                    f"`http://{_lan_ip() or 'عنوان-IP-الحاسوب'}:7860` (المنفذ قد يكون 7861 إن كان 7860 مشغولاً). "
-                    "عند أول تشغيل اسمح لبايثون في جدار حماية ويندوز (شبكة خاصة Private). "
-                    "أزرار «طباعة مباشرة» تطبع على طابعة الحاسوب بصمت وبالمقاس الحقيقي — حتى لو ضغطتها من الهاتف.")
 
             make_btn = gr.Button("اصنع صورة الهوية", variant="primary", elem_id="make-btn")
             with gr.Row():
@@ -1037,6 +1176,18 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
         # ======== النتائج: ثلاث صور فقط ========
         with gr.Column(scale=4):
+            list_head = gr.Button(_sec_label("🗂 قائمة الصور الواصلة", S["ui_list"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_list"]) as list_group:
+                photo_rows = []
+                for _j in range(LIST_ROWS):
+                    with gr.Group(visible=False) as _rg:
+                        _rmd = gr.Markdown("")
+                        with gr.Row():
+                            _rb8 = gr.Button("⚡ تجهيز 8 صور + طبع", size="sm", variant="primary")
+                            _rb12 = gr.Button("⚡ تجهيز 12 صورة + طبع", size="sm")
+                    photo_rows.append((_rg, _rmd, _rb8, _rb12))
+                clear_list_btn = gr.Button("🗑 مسح القائمة", size="sm")
+
             out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=330)
             out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=250)
             out_sheet = gr.Image(label="ورقة الطباعة", type="numpy", interactive=False, height=250)
@@ -1060,6 +1211,43 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
     for _c in SETTINGS_INPUTS:
         _c.change(_persist, inputs=SETTINGS_INPUTS, outputs=None)
+
+    # ---------- أقسام قابلة للطي بحالة محفوظة ----------
+    SECTION_DEFS = [("ui_cut", cut_head, cut_group, "✂️ القص والمقاس"),
+                    ("ui_color", color_head, color_group, "🎨 الألوان والإضاءة"),
+                    ("ui_paper", paper_head, paper_group, "🖨 الورقة والطباعة"),
+                    ("ui_studio", studio_head, studio_group,
+                     "📥 الاستوديو — الكاميرا والهاتف والطباعة المباشرة"),
+                    ("ui_list", list_head, list_group, "🗂 قائمة الصور الواصلة")]
+    SECTION_OUTS = []
+    for _k, _h, _g, _t in SECTION_DEFS:
+        SECTION_OUTS += [_g, _h]
+
+    def _section_updates(s):
+        out = []
+        for key, _h, _g, title in SECTION_DEFS:
+            o = bool(s.get(key))
+            out += [gr.update(visible=o), gr.update(value=_sec_label(title, o))]
+        return out
+
+    def _mk_toggle(key, title):
+        def _toggle():
+            d = load_settings()
+            newv = not d.get(key, False)
+            d[key] = newv
+            save_settings_dict(d)
+            return gr.update(visible=newv), gr.update(value=_sec_label(title, newv))
+        return _toggle
+
+    for _k, _h, _g, _t in SECTION_DEFS:
+        _h.click(_mk_toggle(_k, _t), inputs=None, outputs=[_g, _h])
+
+    # ---------- مخرجات الإشعارات وقائمة الصور ----------
+    DYN_OUTPUTS = [photos_state]
+    for _slot in notif_slots:
+        DYN_OUTPUTS += [_slot[0], _slot[1]]
+    for _row in photo_rows:
+        DYN_OUTPUTS += [_row[0], _row[1]]
 
     # ---------- إظهار/إخفاء ----------
     size_radio.change(lambda v: gr.update(visible=(v == "مقاس مخصص…")),
@@ -1167,10 +1355,47 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     watch_timer = gr.Timer(1.5)
     watch_timer.tick(
         watch_tick,
-        inputs=[watch_state, inbox_txt, watch_chk, automake_chk, in_image,
-                mode_radio, sheet_radio, align_chk, kb_num] + PREVIEW_INPUTS,
+        inputs=[watch_state, photos_state, inbox_txt, watch_chk, automake_chk,
+                in_image, mode_radio, sheet_radio, align_chk, kb_num] + PREVIEW_INPUTS,
         outputs=[watch_state, in_image, state, out_preview, out_std, out_hd,
-                 out_sheet, out_files, out_status, zoom_slider, pan_x, pan_y])
+                 out_sheet, out_files, out_status, zoom_slider, pan_x,
+                 pan_y] + DYN_OUTPUTS)
+
+    # ---------- أزرار التجهيز المباشر + إخفاء الإشعارات + مسح القائمة ----------
+    QUICK_INPUTS = [photos_state, mode_radio, printer_dd, align_chk,
+                    kb_num] + PREVIEW_INPUTS
+    QUICK_OUTPUTS = [photos_state, out_std, out_hd, out_sheet, out_files,
+                     out_status] + DYN_OUTPUTS[1:]
+
+    def _mk_quick(which, idx, kind):
+        def _h(photos, mode, printer, align, kb, *pv):
+            return quick_make_print(photos, which, idx, kind, mode, printer,
+                                    align, kb, *pv)
+        return _h
+
+    def _mk_dismiss(idx):
+        def _d(photos):
+            pd = {"photos": list((photos or {}).get("photos", [])),
+                  "notifs": list((photos or {}).get("notifs", []))}
+            if 0 <= idx < len(pd["notifs"]):
+                pd["notifs"].pop(idx)
+            return render_dynamic(pd)
+        return _d
+
+    for _i, _slot in enumerate(notif_slots):
+        _slot[2].click(_mk_quick("slot", _i, "8"), inputs=QUICK_INPUTS,
+                       outputs=QUICK_OUTPUTS)
+        _slot[3].click(_mk_quick("slot", _i, "12"), inputs=QUICK_INPUTS,
+                       outputs=QUICK_OUTPUTS)
+        _slot[4].click(_mk_dismiss(_i), inputs=[photos_state],
+                       outputs=DYN_OUTPUTS)
+    for _j, _row in enumerate(photo_rows):
+        _row[2].click(_mk_quick("row", _j, "8"), inputs=QUICK_INPUTS,
+                      outputs=QUICK_OUTPUTS)
+        _row[3].click(_mk_quick("row", _j, "12"), inputs=QUICK_INPUTS,
+                      outputs=QUICK_OUTPUTS)
+    clear_list_btn.click(lambda: render_dynamic({"photos": [], "notifs": []}),
+                         inputs=None, outputs=DYN_OUTPUTS)
 
     # ---------- حفظ/استرجاع الإعدادات ----------
     # المشكلة التي أزعجت المستخدم: قيم البداية تتجمّد لحظة إقلاع الخادم، فكل
@@ -1193,27 +1418,26 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         vis = DEFAULT_SETTINGS["mode"] == MODES[1]
         return (*_settings_values(dict(DEFAULT_SETTINGS)),
                 gr.update(visible=vis), gr.update(visible=vis),
+                *_section_updates(dict(DEFAULT_SETTINGS)),
                 "↩️ تمت إعادة ضبط كل الإعدادات إلى قيمها الأصلية.")
 
     def _load_saved():
         s = load_settings()
         vis = s["mode"] == MODES[1]
         return (*_settings_values(s),
-                gr.update(visible=vis), gr.update(visible=vis))
+                gr.update(visible=vis), gr.update(visible=vis),
+                *_section_updates(s))
 
     save_settings_btn.click(_save_now, inputs=SETTINGS_INPUTS, outputs=out_status)
     reset_settings_btn.click(_reset_now, inputs=None,
-                             outputs=SETTINGS_INPUTS + [out_preview, guide_md,
-                                                        out_status])
+                             outputs=SETTINGS_INPUTS + [out_preview, guide_md]
+                                     + SECTION_OUTS + [out_status])
     demo.load(_load_saved, inputs=None,
-              outputs=SETTINGS_INPUTS + [out_preview, guide_md])
+              outputs=SETTINGS_INPUTS + [out_preview, guide_md] + SECTION_OUTS)
 
     gr.HTML("""
     <p style="text-align:center;color:#888;font-size:12px">
-      مبني على محرك <a href="https://github.com/Zeyi-Lin/HivisionIDPhotos" target="_blank">HivisionIDPhotos</a>
-      مفتوح المصدر (رخصة Apache-2.0) — كشف الوجه MTCNN وإزالة الخلفية MODNet.
-      الصور الكبيرة تُبنى نهائياً من بكسلاتها الأصلية كاملة الدقة (مسار HQ).
-    </p>
+    <p style="text-align:center;color:#888;font-size:13px">صُنع بواسطة <b>Zizo3114</b></p>
     """)
 
 if __name__ == "__main__":
