@@ -783,44 +783,176 @@ def clean_folder(p):
     return str(p).strip().strip('"').strip().strip("'")
 
 
-def register_photo(pd, path, name=None):
-    """تسجيل صورة واصلة في القائمة + إشعار يعيش 30 ثانية."""
-    now = datetime.datetime.now()
-    rec = next((x for x in pd["photos"] if x["path"] == path), None)
-    if rec is not None:
-        pd["photos"].remove(rec)
-        rec.update({"time": now.strftime("%H:%M"), "printed": False, "made": False})
+# ===================== قاعدة بيانات الاستوديو (دائمة) =====================
+# سجلّ SQLite داخل مجلد البرنامج: كل صورة واصلة تُعرَّف ببصمة محتواها (SHA-256)
+# لا باسمها — فالصورة نفسها تُعرَف ولو تغيّر اسمها أو مجلدها، وحالتها
+# (وصلت/صُنعت/طُبعت وعدد مرات الطباعة) تعيش عبر الجلسات وإعادات التشغيل.
+import hashlib
+import sqlite3
+
+DB_FILE = os.path.join(BASE_DIR, "studio.db")
+
+
+def _fingerprint(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _db_connect():
+    con = sqlite3.connect(DB_FILE, timeout=15)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("""CREATE TABLE IF NOT EXISTS photos(
+        fp TEXT PRIMARY KEY,
+        name TEXT, src_path TEXT, local_path TEXT,
+        arrived_at TEXT, made INTEGER DEFAULT 0,
+        printed INTEGER DEFAULT 0, print_count INTEGER DEFAULT 0,
+        last_printed_at TEXT)""")
+    return con
+
+
+def _row_to_dict(r):
+    return {"fp": r[0], "name": r[1], "src": r[2], "path": r[3],
+            "time": (r[4] or "")[11:16], "made": bool(r[5]),
+            "printed": bool(r[6]), "print_count": r[7],
+            "last_printed": (r[8] or "")[11:16]}
+
+
+def db_list(limit=60):
+    """أحدث الصور المسجلة (الأحدث أولاً) كقواميس جاهزة للعرض."""
+    try:
+        con = _db_connect()
+        rows = con.execute(
+            "SELECT fp, name, src_path, local_path, arrived_at, made, "
+            "printed, print_count, last_printed_at FROM photos "
+            "ORDER BY arrived_at DESC, rowid DESC LIMIT ?", (limit,)).fetchall()
+        con.close()
+        return [_row_to_dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def db_register(fp, name, src_path, local_path):
+    """
+    تسجيل وصول صورة: إن كانت بصمتها جديدة أُنشئ سجلّها (created=True)،
+    وإن كانت معروفة حُدّث وقت وصولها ومسارها فقط — بلا أي تكرار.
+    """
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    con = _db_connect()
+    cur = con.execute("SELECT fp FROM photos WHERE fp = ?", (fp,))
+    created = cur.fetchone() is None
+    if created:
+        con.execute("INSERT INTO photos(fp, name, src_path, local_path, "
+                    "arrived_at) VALUES(?,?,?,?,?)",
+                    (fp, name, src_path, local_path, now))
     else:
-        rec = {"path": path, "name": name or os.path.basename(path),
-               "time": now.strftime("%H:%M"), "printed": False, "made": False}
-    pd["photos"].insert(0, rec)
-    pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != path]
-    pd["notifs"].append({"pid": path, "expires": now.timestamp() + 30})
+        con.execute("UPDATE photos SET src_path = ?, local_path = ?, "
+                    "arrived_at = ? WHERE fp = ?",
+                    (src_path, local_path, now, fp))
+    con.commit()
+    r = con.execute("SELECT fp, name, src_path, local_path, arrived_at, "
+                    "made, printed, print_count, last_printed_at "
+                    "FROM photos WHERE fp = ?", (fp,)).fetchone()
+    con.close()
+    return _row_to_dict(r), created
+
+
+def db_mark(fp, made=None, printed=False):
+    """تحديث حالة صورة: صُنعت و/أو طُبعت (الطبع يزيد العدّاد ووقت آخر طباعة)."""
+    con = _db_connect()
+    if made is not None:
+        con.execute("UPDATE photos SET made = ? WHERE fp = ?",
+                    (1 if made else 0, fp))
+    if printed:
+        now = datetime.datetime.now().isoformat(timespec="seconds")
+        con.execute("UPDATE photos SET printed = 1, "
+                    "print_count = print_count + 1, last_printed_at = ? "
+                    "WHERE fp = ?", (now, fp))
+    con.commit()
+    con.close()
+
+
+def db_mark_by_local(local_path):
+    """ربط طباعة مباشرة بصورتها في السجل عبر مسار النسخة المحلية."""
+    try:
+        con = _db_connect()
+        r = con.execute("SELECT fp FROM photos WHERE local_path = ?",
+                        (local_path,)).fetchone()
+        con.close()
+        if r:
+            db_mark(r[0], printed=True)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def render_dynamic(pd):
     """بناء تحديثات الإشعارات وقائمة الصور من الحالة (قيم فقط — بلا مكوّنات)."""
     pd = pd or {"photos": [], "notifs": []}
     photos, notifs = pd.get("photos", []), pd.get("notifs", [])
+    by_fp = {p["fp"]: p for p in photos}
     out = [pd]
     for i in range(NOTIF_SLOTS):
         if i < len(notifs):
-            rec = next((x for x in photos if x["path"] == notifs[i]["pid"]), None)
+            n = notifs[i]
+            rec = by_fp.get(n["pid"])
             nm = rec["name"] if rec else "صورة"
             tm = rec["time"] if rec else ""
-            out += [gr.update(visible=True),
-                    gr.update(value=f"📸 **صورة جديدة وصلت** — {nm}  \n🕒 {tm}")]
+            kind = n.get("kind", "new")
+            if kind == "again_printed" and rec:
+                txt = (f"⚠ **تنبيه: صورة مطبوعة سابقاً وصلت مجدداً** — {nm}  \n"
+                       f"🕒 وصلت {tm} · طُبعت {rec['print_count']} مرة "
+                       f"(آخرها {rec['last_printed']})")
+            elif kind == "again_unprinted":
+                txt = (f"📸 **وصلت مجدداً** — {nm}  \n"
+                       f"🕒 {tm} · موجودة في قائمتك ولم تُطبع بعد")
+            else:
+                txt = f"📸 **صورة جديدة وصلت** — {nm}  \n🕒 {tm}"
+            out += [gr.update(visible=True), gr.update(value=txt)]
         else:
             out += [gr.update(visible=False), gr.update(value="")]
     for j in range(LIST_ROWS):
         if j < len(photos):
             p = photos[j]
-            chip = "🟢 **تمت طباعتها**" if p.get("printed") else "🔴 **لم تُطبع بعد**"
+            if p.get("printed"):
+                chip = (f"🟢 **تمت طباعتها** (×{p['print_count']} — "
+                        f"آخرها {p['last_printed']})")
+            else:
+                chip = "🔴 **لم تُطبع بعد**"
             out += [gr.update(visible=True),
                     gr.update(value=f"**{p['name']}** — 🕒 {p['time']} — {chip}")]
         else:
             out += [gr.update(visible=False), gr.update(value="")]
     return tuple(out)
+
+
+def _file_complete(path):
+    """
+    اكتمال ملف صورة بلا فكّ كامل: JPEG الكامل ينتهي بعلامة FFD9 وPNG
+    بمقطع IEND — ملف ما زال يُنسخ لا يحمل خاتمته بعد.
+    """
+    try:
+        low = path.lower()
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            n = f.tell()
+            if low.endswith((".jpg", ".jpeg")):
+                if n < 4:
+                    return False
+                f.seek(n - 2)
+                return f.read(2) == b"\xff\xd9"
+            if low.endswith(".png"):
+                if n < 12:
+                    return False
+                f.seek(n - 12)
+                return f.read(12) == b"\x00\x00\x00\x00IEND\xaeB`\x82"
+            return True
+    except OSError:
+        return False
+
 
 def _inbox_copy(path):
     """
@@ -877,75 +1009,144 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
                color_label, custom_color, guides,
                bright, contrast, satur, sharp, shadows, highlights, temp):
     """
-    نبضة المؤقّت (كل ~1.5 ثانية): صورة جديدة مستقرة الحجم في مجلد الاستقبال
-    تُحمّل كما لو رُفعت يدوياً (+ صنع تلقائي اختياري)، وتُسجَّل في قائمة
-    الصور مع إشعار يعيش 30 ثانية. الإشعارات المنتهية تُخفى في أي نبضة.
+    نبضة المؤقّت: مسح كامل لمجلد الاستقبال في كل نبضة —
+    • كل صورة جديدة (حتى لو وصلت دفعة كاملة معاً) تُسجَّل في قاعدة البيانات
+      بعد استقرار حجمها، لا أحدث صورة فقط.
+    • أول نبضة في الجلسة «بذرة» صامتة: تسجيل بلا إشعارات وبلا لمس للوحة
+      (تحديث الصفحة لا يزيف وصولاً جديداً ولا يمسح عملك).
+    • صورة معروفة البصمة تعود → إشعار (تحذير إن طُبعت سابقاً) بلا تكرار سجل.
+    • القائمة تُقرأ دائماً من قاعدة البيانات: الحقيقة واحدة لكل الجلسات.
     """
     _s = gr.skip()
     SKIP12 = (_s,) * 12
     SKIPDYN = (_s,) * (1 + NOTIF_SLOTS * 2 + LIST_ROWS * 2)
-    pd = {"photos": list((photos or {}).get("photos", [])),
-          "notifs": list((photos or {}).get("notifs", []))}
+    pd = {"photos": [], "notifs": list((photos or {}).get("notifs", []))}
     now_ts = datetime.datetime.now().timestamp()
     kept = [n for n in pd["notifs"] if n.get("expires", 0) > now_ts]
     dyn_changed = len(kept) != len(pd["notifs"])
     pd["notifs"] = kept
-    dyn = render_dynamic(pd) if dyn_changed else SKIPDYN
     folder = clean_folder(inbox_dir)
     if not watch_on or not folder or not os.path.isdir(folder):
-        return SKIP12 + dyn
+        if dyn_changed:
+            pd["photos"] = db_list()
+            return SKIP12 + render_dynamic(pd)
+        return SKIP12 + SKIPDYN
+
     ws = dict(wstate or {})
-    path = newest_inbox_image(folder)
-    if path is None or path == ws.get("loaded"):
-        return SKIP12 + dyn
+    present = dict(ws.get("present") or {})
+    pending = dict(ws.get("pending") or {})
+    first = not ws.get("seeded")
+
+    scan = {}
     try:
-        size = os.path.getsize(path)
+        for fname in os.listdir(folder):
+            if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                fp_path = os.path.join(folder, fname)
+                try:
+                    scan[fp_path] = os.path.getsize(fp_path)
+                except OSError:
+                    pass
     except OSError:
-        return SKIP12 + dyn
-    if ws.get("pending") != path or ws.get("pending_size") != size:
-        ws["pending"], ws["pending_size"] = path, size
-        return (ws,) + (_s,) * 11 + dyn
-    ws["loaded"] = path
-    local = _inbox_copy(path)
-    register_photo(pd, local, name=os.path.basename(path))
-    dyn = render_dynamic(pd)
+        return SKIP12 + (render_dynamic({**pd, "photos": db_list()})
+                         if dyn_changed else SKIPDYN)
+
+    # الاستقرار أولاً: لا تُعالج إلا صورة كانت معلّقة من نبضة سابقة وثبت حجمها
+    ready = []
+    for p, info in list(pending.items()):
+        if p not in scan:
+            pending.pop(p)
+        elif scan[p] == info["size"]:
+            ready.append((p, bool(info.get("silent"))))
+            pending.pop(p)
+        else:
+            info["size"] = scan[p]
+    # ثم تسجيل الظهورات الجديدة كمعلّقة (تُعالج في النبضة التالية إن ثبتت)
+    for p in scan:
+        if p not in present and p not in pending:
+            pending[p] = {"size": scan[p], "silent": bool(first)}
+    ws["present"] = scan
+    ws["pending"] = pending
+    ws["seeded"] = True
+
+    if not ready:
+        if dyn_changed:
+            pd["photos"] = db_list()
+            return (ws,) + (_s,) * 11 + render_dynamic(pd)
+        return (ws,) + (_s,) * 11 + SKIPDYN
+
+    ready.sort(key=lambda t: os.path.getmtime(t[0]))
+    known_fps = {r["fp"] for r in db_list(500)}
     preview_vals = [angle, zoom, pan_x, pan_y, size_label, cw, ch,
                     color_label, custom_color, guides,
                     bright, contrast, satur, sharp, shadows, highlights, temp]
-    st, preview, ostatus, nzoom, npanx, npany = on_upload(local, mode, *preview_vals)
-    name = os.path.basename(path)
-    if st is None:
-        return (ws, local, None, None, _s, _s, _s, _s,
-                f"📥 وصلت صورة جديدة ({name}) لكن تعذّر تجهيزها: {ostatus}",
-                _s, _s, _s) + dyn
-    if not auto_make:
-        return (ws, local, st, preview, _s, _s, _s, _s,
-                f"📥 وصلت صورة جديدة من الكاميرا: {name} — {ostatus}",
-                nzoom, npanx, npany) + dyn
-    ez, epx, epy = zoom, pan_x, pan_y
-    if st.get("init"):
-        ez, epx, epy = st["init"]
-    try:
-        m = make_id_photo(local, st, mode, size_label, cw, ch, color_label,
-                          custom_color, sheet_label, align_face, kb, angle,
-                          ez, epx, epy, bright, contrast, satur, sharp,
-                          shadows, highlights, temp)
-        status = f"📥 صورة جديدة من الكاميرا ({name}) — صُنعت تلقائياً ✓\n{m[4]}"
-        rec = next((x for x in pd["photos"] if x["path"] == local), None)
-        if rec is not None:
-            rec["made"] = True
-            dyn = render_dynamic(pd)
-        return (ws, local, st, preview, m[0], m[1], m[2], m[3], status,
-                nzoom, npanx, npany) + dyn
-    except gr.Error as e:
-        msg = getattr(e, "message", None) or str(e)
-        return (ws, local, st, preview, _s, _s, _s, _s,
-                f"📥 وصلت صورة ({name}) لكن تعذّر صنعها تلقائياً: {msg}",
-                nzoom, npanx, npany) + dyn
-    except Exception as e:
-        return (ws, local, st, preview, _s, _s, _s, _s,
-                f"📥 وصلت صورة ({name}) وحدث خطأ أثناء الصنع التلقائي: {e}",
-                nzoom, npanx, npany) + dyn
+    base = None
+    lines = []
+    loud = 0
+    for path, silent in ready:
+        local = _inbox_copy(path)
+        if not _file_complete(local):
+            # ملف لم يكتمل نزوله بعد: يبقى معلّقاً حتى تظهر خاتمته
+            pending[path] = {"size": scan.get(path, -1), "silent": silent}
+            continue
+        try:
+            fp = _fingerprint(local)
+        except Exception:
+            continue
+        if silent and fp in known_fps:
+            continue  # معروفة من قبل: لا نلمس سجلّها (وقتها وحالتها محفوظان)
+        row, created = db_register(fp, os.path.basename(path), path, local)
+        if silent:
+            continue
+        loud += 1
+        kind = ("new" if created else
+                "again_printed" if row["printed"] else "again_unprinted")
+        pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != fp]
+        pd["notifs"].append({"pid": fp, "kind": kind,
+                             "expires": now_ts + 30})
+        st, preview, ostatus, nzoom, npanx, npany = on_upload(
+            local, mode, *preview_vals)
+        name = os.path.basename(path)
+        if st is None:
+            lines.append(f"📥 وصلت ({name}) لكن تعذّر تجهيزها: {ostatus}")
+            base = (ws, local, None, None, _s, _s, _s, _s,
+                    "\n".join(lines), _s, _s, _s)
+            continue
+        if not auto_make:
+            lines.append(f"📥 وصلت صورة من الكاميرا: {name} — {ostatus}")
+            base = (ws, local, st, preview, _s, _s, _s, _s,
+                    "\n".join(lines), nzoom, npanx, npany)
+            continue
+        ez, epx, epy = zoom, pan_x, pan_y
+        if st.get("init"):
+            ez, epx, epy = st["init"]
+        try:
+            m = make_id_photo(local, st, mode, size_label, cw, ch,
+                              color_label, custom_color, sheet_label,
+                              align_face, kb, angle, ez, epx, epy,
+                              bright, contrast, satur, sharp,
+                              shadows, highlights, temp)
+            db_mark(fp, made=True)
+            lines.append(f"📥 ({name}) — صُنعت تلقائياً ✓\n{m[4]}")
+            base = (ws, local, st, preview, m[0], m[1], m[2], m[3],
+                    "\n".join(lines), nzoom, npanx, npany)
+        except gr.Error as e:
+            msg = getattr(e, "message", None) or str(e)
+            lines.append(f"📥 وصلت ({name}) لكن تعذّر صنعها: {msg}")
+            base = (ws, local, st, preview, _s, _s, _s, _s,
+                    "\n".join(lines), nzoom, npanx, npany)
+        except Exception as e:
+            lines.append(f"📥 وصلت ({name}) وخطأ أثناء الصنع: {e}")
+            base = (ws, local, st, preview, _s, _s, _s, _s,
+                    "\n".join(lines), nzoom, npanx, npany)
+    if loud > 1:
+        lines.insert(0, f"📥 وصلت {loud} صور دفعة واحدة — سُجّلت وصُنعت كلها:")
+    pd["photos"] = db_list()
+    dyn = render_dynamic(pd)
+    if base is None:
+        return (ws,) + (_s,) * 11 + dyn
+    if loud > 1:
+        base = base[:8] + ("\n".join(lines),) + base[9:]
+    return base + dyn
 
 
 def quick_make_print(photos, which, idx, kind, mode, printer, align_face, kb,
@@ -955,17 +1156,17 @@ def quick_make_print(photos, which, idx, kind, mode, printer, align_face, kb,
     ويطبعها مباشرة على الطابعة المختارة (تنفيذ على الخادم — يعمل من الهاتف).
     """
     _s = gr.skip()
-    pd = {"photos": list((photos or {}).get("photos", [])),
+    pd = {"photos": db_list(),
           "notifs": list((photos or {}).get("notifs", []))}
     rec = None
     if which == "slot":
         if 0 <= idx < len(pd["notifs"]):
             pid = pd["notifs"][idx]["pid"]
-            rec = next((x for x in pd["photos"] if x["path"] == pid), None)
+            rec = next((x for x in pd["photos"] if x["fp"] == pid), None)
     elif 0 <= idx < len(pd["photos"]):
         rec = pd["photos"][idx]
     if rec is None:
-        return (pd, _s, _s, _s, _s, _s) + render_dynamic(pd)[1:]
+        return (pd, _s, _s, _s, _s, _s) + render_dynamic({**pd, 'photos': db_list()})[1:]
     sheet_label = ("8 صور — ورقة 10 × 15 سم" if kind == "8"
                    else "12 صورة — ورقة 15 × 20 سم")
     try:
@@ -973,7 +1174,7 @@ def quick_make_print(photos, which, idx, kind, mode, printer, align_face, kb,
         if st is None:
             return (pd, _s, _s, _s, _s,
                     f"تعذّر تجهيز الصورة {rec['name']} — جرّب صنعها من اللوحة يدوياً.") \
-                + render_dynamic(pd)[1:]
+                + render_dynamic({**pd, 'photos': db_list()})[1:]
         ez, epx, epy = preview_vals[1], preview_vals[2], preview_vals[3]
         if st.get("init"):
             ez, epx, epy = st["init"]
@@ -982,24 +1183,26 @@ def quick_make_print(photos, which, idx, kind, mode, printer, align_face, kb,
                           sheet_label, align_face, kb, preview_vals[0],
                           ez, epx, epy, *preview_vals[10:17])
         status = f"⚡ تجهيز مباشر ({kind} صور) — {rec['name']} ✓\n{m[4]}"
-        rec["made"] = True
+        db_mark(rec["fp"], made=True)
         if printer:
             pr = direct_print(m[3], printer, True, sheet_label)
             status += "\n" + pr
             if pr.startswith("🖨"):
-                rec["printed"] = True
+                db_mark(rec["fp"], printed=True)
+                if rec.get("printed"):
+                    status += "\n(إعادة طباعة — هذه الصورة كانت مطبوعة سابقاً.)"
         else:
             status += "\n⚠ صُنعت الورقة لكن لم تُطبع: اختر الطابعة أولاً من قسم الاستوديو."
         if which == "slot":
-            pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != rec["path"]]
-        return (pd, m[0], m[1], m[2], m[3], status) + render_dynamic(pd)[1:]
+            pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != rec["fp"]]
+        return (pd, m[0], m[1], m[2], m[3], status) + render_dynamic({**pd, 'photos': db_list()})[1:]
     except gr.Error as e:
         msg = getattr(e, "message", None) or str(e)
         return (pd, _s, _s, _s, _s,
-                f"⚡ تعذّر التجهيز المباشر لـ{rec['name']}: {msg}") + render_dynamic(pd)[1:]
+                f"⚡ تعذّر التجهيز المباشر لـ{rec['name']}: {msg}") + render_dynamic({**pd, 'photos': db_list()})[1:]
     except Exception as e:
         return (pd, _s, _s, _s, _s,
-                f"⚡ خطأ أثناء التجهيز المباشر لـ{rec['name']}: {e}") + render_dynamic(pd)[1:]
+                f"⚡ خطأ أثناء التجهيز المباشر لـ{rec['name']}: {e}") + render_dynamic({**pd, 'photos': db_list()})[1:]
 
 
 def list_printers():
@@ -1103,8 +1306,8 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     """)
 
     state = gr.State(None)
-    watch_state = gr.State({"loaded": None, "pending": None, "pending_size": -1})
-    photos_state = gr.State({"photos": [], "notifs": []})
+    watch_state = gr.State({"present": {}, "pending": {}, "seeded": False})
+    photos_state = gr.State({"photos": db_list(), "notifs": []})
 
     # ======== إشعارات الصور الجديدة (تعيش 30 ثانية) ========
     notif_slots = []
@@ -1207,7 +1410,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                             _rb8 = gr.Button("⚡ تجهيز 8 صور + طبع", size="sm", variant="primary")
                             _rb12 = gr.Button("⚡ تجهيز 12 صورة + طبع", size="sm")
                     photo_rows.append((_rg, _rmd, _rb8, _rb12))
-                clear_list_btn = gr.Button("🗑 مسح القائمة", size="sm")
+                gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة.")
 
             out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=330)
             out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=250)
@@ -1362,16 +1565,30 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     refresh_printers_btn.click(lambda: gr.update(choices=list_printers()),
                                inputs=None, outputs=printer_dd)
 
-    def _dprint_sheet(files, printer, sheet_label):
-        return direct_print(files, printer, True, sheet_label)
+    def _after_direct(status, photos, img):
+        if status.startswith("🖨") and isinstance(img, str) and img:
+            if db_mark_by_local(img):
+                status += "\n✓ سُجّلت هذه الطباعة في قائمة الصور."
+        pd = {"photos": db_list(),
+              "notifs": list((photos or {}).get("notifs", []))}
+        return (status,) + render_dynamic(pd)
 
-    def _dprint_photo(files, printer):
-        return direct_print(files, printer, False, None)
+    def _dprint_sheet(files, printer, sheet_label, photos, img):
+        return _after_direct(direct_print(files, printer, True, sheet_label),
+                             photos, img)
 
-    direct_sheet_btn.click(_dprint_sheet, inputs=[out_files, printer_dd, sheet_radio],
-                           outputs=out_status)
-    direct_photo_btn.click(_dprint_photo, inputs=[out_files, printer_dd],
-                           outputs=out_status)
+    def _dprint_photo(files, printer, photos, img):
+        return _after_direct(direct_print(files, printer, False, None),
+                             photos, img)
+
+    direct_sheet_btn.click(_dprint_sheet,
+                           inputs=[out_files, printer_dd, sheet_radio,
+                                   photos_state, in_image],
+                           outputs=[out_status] + DYN_OUTPUTS)
+    direct_photo_btn.click(_dprint_photo,
+                           inputs=[out_files, printer_dd, photos_state,
+                                   in_image],
+                           outputs=[out_status] + DYN_OUTPUTS)
 
     watch_timer = gr.Timer(1.5)
     watch_timer.tick(
@@ -1415,8 +1632,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                       outputs=QUICK_OUTPUTS)
         _row[3].click(_mk_quick("row", _j, "12"), inputs=QUICK_INPUTS,
                       outputs=QUICK_OUTPUTS)
-    clear_list_btn.click(lambda: render_dynamic({"photos": [], "notifs": []}),
-                         inputs=None, outputs=DYN_OUTPUTS)
+
 
     # ---------- حفظ/استرجاع الإعدادات ----------
     # المشكلة التي أزعجت المستخدم: قيم البداية تتجمّد لحظة إقلاع الخادم، فكل
@@ -1447,14 +1663,16 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         vis = s["mode"] == MODES[1]
         return (*_settings_values(s),
                 gr.update(visible=vis), gr.update(visible=vis),
-                *_section_updates(s))
+                *_section_updates(s),
+                *render_dynamic({"photos": db_list(), "notifs": []}))
 
     save_settings_btn.click(_save_now, inputs=SETTINGS_INPUTS, outputs=out_status)
     reset_settings_btn.click(_reset_now, inputs=None,
                              outputs=SETTINGS_INPUTS + [out_preview, guide_md]
                                      + SECTION_OUTS + [out_status])
     demo.load(_load_saved, inputs=None,
-              outputs=SETTINGS_INPUTS + [out_preview, guide_md] + SECTION_OUTS)
+              outputs=SETTINGS_INPUTS + [out_preview, guide_md] + SECTION_OUTS
+                      + DYN_OUTPUTS)
 
     gr.HTML("""
     <p style="text-align:center;color:#888;font-size:12px">
