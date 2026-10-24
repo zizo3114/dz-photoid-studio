@@ -17,6 +17,7 @@
 كل المعالجة على جهاز المستخدم، والإعدادات محفوظة في settings.json.
 """
 import os
+import shutil
 
 os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
 
@@ -782,7 +783,7 @@ def clean_folder(p):
     return str(p).strip().strip('"').strip().strip("'")
 
 
-def register_photo(pd, path):
+def register_photo(pd, path, name=None):
     """تسجيل صورة واصلة في القائمة + إشعار يعيش 30 ثانية."""
     now = datetime.datetime.now()
     rec = next((x for x in pd["photos"] if x["path"] == path), None)
@@ -790,7 +791,7 @@ def register_photo(pd, path):
         pd["photos"].remove(rec)
         rec.update({"time": now.strftime("%H:%M"), "printed": False, "made": False})
     else:
-        rec = {"path": path, "name": os.path.basename(path),
+        rec = {"path": path, "name": name or os.path.basename(path),
                "time": now.strftime("%H:%M"), "printed": False, "made": False}
     pd["photos"].insert(0, rec)
     pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != path]
@@ -820,6 +821,25 @@ def render_dynamic(pd):
         else:
             out += [gr.update(visible=False), gr.update(value="")]
     return tuple(out)
+
+def _inbox_copy(path):
+    """
+    نسخ صورة الاستقبال إلى outputs/inbox داخل مجلد البرنامج.
+    ضروري: غراديو يرفض (InvalidPathError) عرض أي ملف تُرجعه الدوال إن لم يكن
+    داخل مجلد العمل أو المؤقت — ومجلد الكاميرا خارجي بطبيعته. النسخة مطابقة
+    بايتاً للأصل، والأصل لا يُلمس.
+    """
+    try:
+        dst_dir = os.path.join(BASE_DIR, "outputs", "inbox")
+        os.makedirs(dst_dir, exist_ok=True)
+        dst = os.path.join(dst_dir, os.path.basename(path))
+        if os.path.isfile(dst) and os.path.getsize(dst) == os.path.getsize(path):
+            return dst
+        shutil.copy2(path, dst)
+        return dst
+    except Exception:
+        return path
+
 
 def newest_inbox_image(folder):
     """أحدث صورة (JPG/PNG) في مجلد الاستقبال، أو None."""
@@ -886,43 +906,44 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
         ws["pending"], ws["pending_size"] = path, size
         return (ws,) + (_s,) * 11 + dyn
     ws["loaded"] = path
-    register_photo(pd, path)
+    local = _inbox_copy(path)
+    register_photo(pd, local, name=os.path.basename(path))
     dyn = render_dynamic(pd)
     preview_vals = [angle, zoom, pan_x, pan_y, size_label, cw, ch,
                     color_label, custom_color, guides,
                     bright, contrast, satur, sharp, shadows, highlights, temp]
-    st, preview, ostatus, nzoom, npanx, npany = on_upload(path, mode, *preview_vals)
+    st, preview, ostatus, nzoom, npanx, npany = on_upload(local, mode, *preview_vals)
     name = os.path.basename(path)
     if st is None:
-        return (ws, path, None, None, _s, _s, _s, _s,
+        return (ws, local, None, None, _s, _s, _s, _s,
                 f"📥 وصلت صورة جديدة ({name}) لكن تعذّر تجهيزها: {ostatus}",
                 _s, _s, _s) + dyn
     if not auto_make:
-        return (ws, path, st, preview, _s, _s, _s, _s,
+        return (ws, local, st, preview, _s, _s, _s, _s,
                 f"📥 وصلت صورة جديدة من الكاميرا: {name} — {ostatus}",
                 nzoom, npanx, npany) + dyn
     ez, epx, epy = zoom, pan_x, pan_y
     if st.get("init"):
         ez, epx, epy = st["init"]
     try:
-        m = make_id_photo(path, st, mode, size_label, cw, ch, color_label,
+        m = make_id_photo(local, st, mode, size_label, cw, ch, color_label,
                           custom_color, sheet_label, align_face, kb, angle,
                           ez, epx, epy, bright, contrast, satur, sharp,
                           shadows, highlights, temp)
         status = f"📥 صورة جديدة من الكاميرا ({name}) — صُنعت تلقائياً ✓\n{m[4]}"
-        rec = next((x for x in pd["photos"] if x["path"] == path), None)
+        rec = next((x for x in pd["photos"] if x["path"] == local), None)
         if rec is not None:
             rec["made"] = True
             dyn = render_dynamic(pd)
-        return (ws, path, st, preview, m[0], m[1], m[2], m[3], status,
+        return (ws, local, st, preview, m[0], m[1], m[2], m[3], status,
                 nzoom, npanx, npany) + dyn
     except gr.Error as e:
         msg = getattr(e, "message", None) or str(e)
-        return (ws, path, st, preview, _s, _s, _s, _s,
+        return (ws, local, st, preview, _s, _s, _s, _s,
                 f"📥 وصلت صورة ({name}) لكن تعذّر صنعها تلقائياً: {msg}",
                 nzoom, npanx, npany) + dyn
     except Exception as e:
-        return (ws, path, st, preview, _s, _s, _s, _s,
+        return (ws, local, st, preview, _s, _s, _s, _s,
                 f"📥 وصلت صورة ({name}) وحدث خطأ أثناء الصنع التلقائي: {e}",
                 nzoom, npanx, npany) + dyn
 
