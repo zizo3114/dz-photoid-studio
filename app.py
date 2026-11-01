@@ -69,8 +69,8 @@ SHEETS = {
     "12 صورة — ورقة 15 × 20 سم": ((2400, 1800), 4, 3),  # ورق المختبر الحقيقي 8×6 بوصة (203×152مم) عند 300 DPI
 }
 
-NOTIF_SLOTS = 3   # إشعارات ظاهرة في نفس الوقت كحد أقصى
-LIST_ROWS = 6     # صور ظاهرة في قائمة الصور كحد أقصى
+NOTIF_SLOTS = 6   # بطاقات إشعار متراكبة كحد أقصى (داخل صندوق بسكرول)
+LIST_ROWS = 10    # صور ظاهرة في قائمة الصور كحد أقصى (داخل صندوق بسكرول)
 
 MODES = ["تلقائي — كشف الوجه والقص الذكي", "يدوي — أنا أضبط القص بنفسي"]
 
@@ -142,6 +142,19 @@ def get_creator() -> IDCreator:
         # تعطيل إضافة التجميل: لا حاجة لها في صور الهوية، وتحتاج ملفاً ثنائياً
         # (جدول ألوان LUT) — تجاوزها يجعل البرنامج يعمل بنفس الشكل في كل النسخ.
         _creator.beauty_handler = lambda ctx: None
+        # تسجيل زاوية ميلان الوجه من الكشف الأول لكل تشغيل: المحرك (عند
+        # التصحيح) يدوّر صوره داخلياً ثم يعيد الكشف فيكتب زاوية ثانية شبه
+        # صفرية فوق الأولى — ومسار الجودة العالية يحتاج الزاوية الأصلية
+        # ليدوّر الأصلية كاملة الدقة بنفس مقدار المحرك تماماً.
+        def _dz_before(ctx):
+            _creator._dz_first_roll = None
+
+        def _dz_detect(ctx):
+            if getattr(_creator, "_dz_first_roll", None) is None and ctx.face:
+                _creator._dz_first_roll = ctx.face.get("roll_angle")
+
+        _creator.before_all = _dz_before
+        _creator.after_detect = _dz_detect
     return _creator
 
 
@@ -292,13 +305,21 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignmen
             return None
         roll = ctx.face.get("roll_angle") or 0
         base_bgr = orig_bgr
-        if face_alignment and abs(roll) > 2:
-            # المحرك دوّر صورته داخلياً لتصحيح الميلان: ندوّر الأصلية كاملة الدقة
-            # بنفس الزاوية والأداة حتى تبقى الهندسة متطابقة ويعمل مسار HQ
-            # (سابقاً كانت الصور المائلة الرأس تسقط إلى مسار مصغّر ضبابي)
-            from hivision.creator.rotation_adjust import rotate_bound_4channels
-            _alpha = np.full(orig_bgr.shape[:2], 255, dtype=np.uint8)
-            base_bgr = rotate_bound_4channels(orig_bgr, _alpha, -1 * roll)[0]
+        if face_alignment:
+            first_roll = getattr(creator, "_dz_first_roll", None)
+            if first_roll is None:
+                # لا نعرف مقدار التدوير الذي طبّقه المحرك داخلياً — لا نخاطر
+                # بتركيب هندسة غير مؤكدة (كان ينتج وجهاً مقصوصاً)؛ نتراجع
+                # إلى نتيجة المحرك القياسية السليمة.
+                return None
+            if abs(first_roll) > 2:
+                # المحرك دوّر صوره داخلياً بالزاوية الأصلية: ندوّر الأصلية
+                # كاملة الدقة بنفس الزاوية والأداة حتى تتطابق مع قناع الإزالة
+                # ومستطيل الوجه (كلاهما في إطار الصورة المدوَّرة).
+                from hivision.creator.rotation_adjust import rotate_bound_4channels
+                _alpha = np.full(orig_bgr.shape[:2], 255, dtype=np.uint8)
+                base_bgr = rotate_bound_4channels(
+                    orig_bgr, _alpha, -1 * first_roll)[0]
         virt = build_virtual_bgra(base_bgr, ctx.matting_image)
         if virt is None:
             return None
@@ -821,6 +842,31 @@ def _row_to_dict(r):
             "last_printed": (r[8] or "")[11:16]}
 
 
+def db_delete_photo(fp):
+    """
+    حذف سجل صورة من القائمة نهائياً + تذكّر بصمتها كي لا يعيدها المراقب
+    من مجلد الكاميرا. ملف الصورة الأصلي في المجلد لا يُمسّ أبداً.
+    """
+    con = _db_connect()
+    con.execute("CREATE TABLE IF NOT EXISTS ignored(fp TEXT PRIMARY KEY, at TEXT)")
+    con.execute("DELETE FROM photos WHERE fp = ?", (fp,))
+    con.execute("INSERT OR REPLACE INTO ignored(fp, at) VALUES(?, ?)",
+                (fp, datetime.datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+    con.close()
+
+
+def db_ignored_fps():
+    try:
+        con = _db_connect()
+        con.execute("CREATE TABLE IF NOT EXISTS ignored(fp TEXT PRIMARY KEY, at TEXT)")
+        rows = con.execute("SELECT fp FROM ignored").fetchall()
+        con.close()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
+
 def db_list(limit=60):
     """أحدث الصور المسجلة (الأحدث أولاً) كقواميس جاهزة للعرض."""
     try:
@@ -1077,6 +1123,7 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
 
     ready.sort(key=lambda t: os.path.getmtime(t[0]))
     known_fps = {r["fp"] for r in db_list(500)}
+    ignored_fps = db_ignored_fps()
     preview_vals = [angle, zoom, pan_x, pan_y, size_label, cw, ch,
                     color_label, custom_color, guides,
                     bright, contrast, satur, sharp, shadows, highlights, temp]
@@ -1093,6 +1140,8 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
             fp = _fingerprint(local)
         except Exception:
             continue
+        if fp in ignored_fps:
+            continue  # حذفها المستخدم من القائمة: لا ترجع أبداً
         if silent and fp in known_fps:
             continue  # معروفة من قبل: لا نلمس سجلّها (وقتها وحالتها محفوظان)
         row, created = db_register(fp, os.path.basename(path), path, local)
@@ -1206,6 +1255,20 @@ def quick_make_print(photos, which, idx, kind, mode, printer, align_face, kb,
                 f"⚡ خطأ أثناء التجهيز المباشر لـ{rec['name']}: {e}") + render_dynamic({**pd, 'photos': db_list()})[1:]
 
 
+def delete_photo_record(photos, idx):
+    """زر 🗑 في قائمة الصور: حذف السجل من القائمة فقط (بلا مساس بالملفات)."""
+    pd = {"photos": db_list(),
+          "notifs": list((photos or {}).get("notifs", []))}
+    msg = ""
+    if 0 <= idx < len(pd["photos"]):
+        rec = pd["photos"][idx]
+        db_delete_photo(rec["fp"])
+        pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != rec["fp"]]
+        msg = (f"🗑 حُذف سجل «{rec['name']}» من القائمة. ملف الصورة نفسه "
+               "باقٍ في مجلد الكاميرا كما هو.")
+    return render_dynamic({**pd, "photos": db_list()}) + (msg,)
+
+
 def list_printers():
     """أسماء الطابعات المثبتة (ويندوز فقط — عبر PowerShell)."""
     if os.name != "nt":
@@ -1303,6 +1366,10 @@ footer { display: none !important; }
 #photo_list_box::-webkit-scrollbar { width: 10px; }
 #photo_list_box::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
 #photo_list_box::-webkit-scrollbar-thumb { background: #0d9488; border-radius: 6px; }
+#notif_box { max-height: 480px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #0d9488 #1e293b; }
+#notif_box::-webkit-scrollbar { width: 10px; }
+#notif_box::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
+#notif_box::-webkit-scrollbar-thumb { background: #0d9488; border-radius: 6px; }
 #layout_style { display: none; }
 """
 
@@ -1337,6 +1404,8 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
     # ======== إشعارات الصور الجديدة (تعيش 30 ثانية) ========
     notif_slots = []
+    _notif_ctx = gr.Column(elem_id="notif_box")
+    _notif_ctx.__enter__()
     for _i in range(NOTIF_SLOTS):
         with gr.Group(visible=False) as _ng:
             _nmd = gr.Markdown("")
@@ -1345,6 +1414,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 _nb12 = gr.Button("⚡ تجهيز مباشر 12 صورة + طبع", size="sm")
                 _nbh = gr.Button("إخفاء", size="sm")
         notif_slots.append((_ng, _nmd, _nb8, _nb12, _nbh))
+    _notif_ctx.__exit__(None, None, None)
 
 
     with gr.Row():
@@ -1449,9 +1519,10 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                         with gr.Row():
                             _rb8 = gr.Button("⚡ تجهيز 8 صور + طبع", size="sm", variant="primary")
                             _rb12 = gr.Button("⚡ تجهيز 12 صورة + طبع", size="sm")
-                    photo_rows.append((_rg, _rmd, _rb8, _rb12))
+                            _rbdel = gr.Button("🗑 حذف", size="sm")
+                    photo_rows.append((_rg, _rmd, _rb8, _rb12, _rbdel))
                 _rows_ctx.__exit__(None, None, None)
-                gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة.")
+                gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة. زر «🗑 حذف» يزيل السجل من القائمة فقط — ملف الصورة في مجلد الكاميرا لا يُمسّ.")
 
             out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=330)
             out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=250)
@@ -1679,11 +1750,18 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                        outputs=QUICK_OUTPUTS)
         _slot[4].click(_mk_dismiss(_i), inputs=[photos_state],
                        outputs=DYN_OUTPUTS)
+    def _mk_delete(idx):
+        def _del(photos):
+            return delete_photo_record(photos, idx)
+        return _del
+
     for _j, _row in enumerate(photo_rows):
         _row[2].click(_mk_quick("row", _j, "8"), inputs=QUICK_INPUTS,
                       outputs=QUICK_OUTPUTS)
         _row[3].click(_mk_quick("row", _j, "12"), inputs=QUICK_INPUTS,
                       outputs=QUICK_OUTPUTS)
+        _row[4].click(_mk_delete(_j), inputs=[photos_state],
+                      outputs=DYN_OUTPUTS + [out_status])
 
 
     # ---------- حفظ/استرجاع الإعدادات ----------
