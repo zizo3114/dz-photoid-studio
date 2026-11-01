@@ -1363,6 +1363,7 @@ footer { display: none !important; }
   #col_controls { flex: 1 1 0% !important; min-width: 330px; }
 }
 #photo_list_box { max-height: var(--listh, 340px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #0d9488 #1e293b; }
+#photo_list_box > *, #notif_box > * { flex-shrink: 0 !important; }
 #photo_list_box::-webkit-scrollbar { width: 10px; }
 #photo_list_box::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
 #photo_list_box::-webkit-scrollbar-thumb { background: #0d9488; border-radius: 6px; }
