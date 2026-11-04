@@ -27,9 +27,13 @@ if not exist .venv\Scripts\python.exe (
 )
 set VPY=.venv\Scripts\python.exe
 
-REM ---------- تثبيت المكتبات + تحديثها تلقائيا عند تغيّر requirements.txt ----------
-%VPY% -c "import hashlib,os,sys; h=hashlib.md5(open('requirements.txt','rb').read()).hexdigest(); old=open('.venv/.reqhash').read().strip() if os.path.exists('.venv/.reqhash') else ''; sys.exit(0 if h==old else 1)" >nul 2>&1
+REM ---------- عند تغيّر المكتبات: إعادة بناء البيئة من الصفر (أنظف من الترقية فوق القديمة) ----------
+%VPY% -c "import hashlib,os,sys; h=hashlib.md5(open('requirements.txt','rb').read()+b'|v11.1').hexdigest(); old=open('.venv/.reqhash').read().strip() if os.path.exists('.venv/.reqhash') else ''; sys.exit(0 if h==old else 1)" >nul 2>&1
 if errorlevel 1 (
+  echo إعادة بناء بيئة البرنامج من الصفر - قد يأخذ بضع دقائق...
+  rmdir /s /q .venv
+  %PY% -m venv .venv
+  set VPY=.venv\Scripts\python.exe
   echo تثبيت/تحديث المكتبات - قد يأخذ بضع دقائق...
   %VPY% -m pip install --upgrade pip
   %VPY% -m pip install --prefer-binary -r requirements.txt
@@ -41,7 +45,7 @@ if errorlevel 1 (
     pause
     exit /b 1
   )
-  %VPY% -c "import hashlib; open('.venv/.reqhash','w').write(hashlib.md5(open('requirements.txt','rb').read()).hexdigest())"
+  %VPY% -c "import hashlib; open('.venv/.reqhash','w').write(hashlib.md5(open('requirements.txt','rb').read()+b'|v11.1').hexdigest())"
   echo ok> .venv\\.installed
 )
 

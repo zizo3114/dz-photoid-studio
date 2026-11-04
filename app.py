@@ -1509,7 +1509,18 @@ CUSTOM_CSS = """@import url('https://fonts.googleapis.com/css2?family=Cairo:wght
   width: min(var(--pagew, 100%), 100%);
   max-width: none;
 }
-body.dark.gradio-container {
+body, body.dark {
+  --body-background-fill: #F4F5F7 !important;
+  --body-text-color: #1F2937 !important;
+  color-scheme: light;
+}
+/* عناوين المكوّنات (شارات زرقاء في الوضع الليلي من ثيم Gradio) — لون هادئ دائماً */
+.gradio-container span.svelte-jdcl7l,
+.gradio-container fieldset.block > span:first-child {
+  background: #F1F5F9 !important;
+  color: #475569 !important;
+}
+body.dark .gradio-container {
   --body-background-fill: #F4F5F7;
   --body-text-color: #1F2937;
   --block-background-fill: #FFFFFF;
