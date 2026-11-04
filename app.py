@@ -93,7 +93,8 @@ DEFAULT_SETTINGS = {
     "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "sharpness": 1.0,
     "shadows": 0, "highlights": 0, "temperature": 0,
     "inbox": "", "watch": False, "automake": False, "printer": "",
-    "ui_cut": True, "ui_color": False, "ui_paper": False,
+    "ui_cut": True, "ui_bg": True, "ui_color": False, "ui_quality": False,
+    "ui_paper": False,
     "ui_studio": False, "ui_list": True, "ui_layout": False,
     "layout_page": 100, "layout_split": 40, "layout_listh": 340,
 }
@@ -1456,30 +1457,133 @@ PRINT_PHOTO_JS = ("(files, sheetLabel, sizeLabel, cwMm, chMm) => {" +
 
 # ----------------------------- الواجهة -----------------------------
 
-CUSTOM_CSS = """
-.gradio-container { direction: rtl; font-family: Tahoma, 'Segoe UI', sans-serif; }
-#app-title { text-align: center; padding: 18px 10px 4px; }
-#app-title h1 { font-size: 30px; margin: 0; color: #0b6b3a; }
-#app-title p { color: #555; margin: 6px 0 0; }
-.section-head { margin-top: 8px; }
-.section-head button { justify-content: flex-start; font-weight: 700; font-size: 15px; }
-#make-btn { font-size: 19px !important; padding: 14px !important; }
-footer { display: none !important; }
-.gradio-container { max-width: var(--pagew, 100%) !important; margin-left: auto !important; margin-right: auto !important; }
-@media (min-width: 900px) {
-  #col_results { flex: 0 0 var(--wres, 40%) !important; max-width: var(--wres, 40%) !important; min-width: 300px; }
-  #col_controls { flex: 1 1 0% !important; min-width: 330px; }
+CUSTOM_CSS = """@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
+
+.gradio-container {
+  direction: rtl;
+  font-family: 'Cairo', Tahoma, 'Segoe UI', sans-serif;
+  color-scheme: light;
+  --body-background-fill: #F1F5F9;
+  --body-text-color: #111827;
+  --block-background-fill: #FFFFFF;
+  --block-border-color: #E2E8F0;
+  --block-label-background-fill: #F8FAFC;
+  --block-label-text-color: #475569;
+  --block-title-text-color: #111827;
+  --input-background-fill: #FFFFFF;
+  --input-border-color: #CBD5E1;
+  --input-placeholder-color: #94A3B8;
+  --color-accent: #2563EB;
+  --border-color-primary: #E2E8F0;
+  --border-color-accent: #BFDBFE;
+  --slider-color: #2563EB;
+  --button-primary-background-fill: #2563EB;
+  --button-primary-background-fill-hover: #1D4ED8;
+  --button-primary-text-color: #FFFFFF;
+  --button-primary-border-color: #2563EB;
+  --button-secondary-background-fill: #FFFFFF;
+  --button-secondary-background-fill-hover: #F1F5F9;
+  --button-secondary-text-color: #1E293B;
+  --button-secondary-border-color: #CBD5E1;
+  --checkbox-background-color: #FFFFFF;
+  --checkbox-label-text-color: #1E293B;
+  --checkbox-border-color: #CBD5E1;
+  --checkbox-label-background-fill: #F8FAFC;
+  --checkbox-label-background-fill-hover: #EFF6FF;
+  --checkbox-label-background-fill-selected: #EFF6FF;
+  --checkbox-label-text-color-selected: #1D4ED8;
+  --shadow-drop: 0 1px 3px rgba(15, 23, 42, 0.08);
+  background: #F1F5F9;
 }
-#photo_list_box { max-height: var(--listh, 340px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #0d9488 #1e293b; }
+body.dark .gradio-container, .dark .gradio-container {
+  --body-background-fill: #F1F5F9;
+  --body-text-color: #111827;
+  --block-background-fill: #FFFFFF;
+  --block-border-color: #E2E8F0;
+  --block-label-background-fill: #F8FAFC;
+  --block-label-text-color: #475569;
+  --block-title-text-color: #111827;
+  --input-background-fill: #FFFFFF;
+  --input-border-color: #CBD5E1;
+  --body-text-color-subdued: #64748B;
+  background: #F1F5F9;
+  color: #111827;
+}
+.gradio-container { max-width: var(--pagew, 100%) !important; margin-left: auto !important; margin-right: auto !important; }
+footer { display: none !important; }
+#layout_style { display: none; }
+
+/* ===== الشريط العلوي ===== */
+#topbar { background: #111827 !important; border: none !important; border-radius: 16px !important; padding: 10px 18px !important; box-shadow: 0 4px 14px rgba(15,23,42,.18); }
+#topbar * { background-color: transparent !important; }
+#topbar .brand { display: flex; align-items: center; gap: 12px; }
+#topbar .brand-name { color: #FFFFFF; font-weight: 800; font-size: 20px; letter-spacing: .4px; line-height: 1.1; }
+#topbar .brand-sub { color: #94A3B8; font-size: 13px; font-weight: 600; }
+#topbar .top-status { color: #A7F3D0; font-size: 13px; font-weight: 700; text-align: center; padding-top: 12px; }
+#topbar .top-status .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background-color: #10B981 !important; margin-inline-end: 6px; box-shadow: 0 0 0 3px rgba(16,185,129,.25); }
+#topbar button { background: #1F2937 !important; color: #E5E7EB !important; border: 1px solid #374151 !important; }
+#topbar button:hover { background: #374151 !important; }
+#topbar .gr-group, #topbar .block { background: transparent !important; border-color: #374151 !important; color: #E5E7EB !important; }
+
+/* ===== عناوين الأقسام (أكورديون) ===== */
+.section-head { margin-top: 10px; }
+.section-head button { justify-content: flex-start; font-weight: 700; font-size: 15px; background: #FFFFFF !important; color: #111827 !important; border: 1px solid #E2E8F0 !important; border-radius: 12px !important; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+.section-head button:hover { border-color: #2563EB !important; color: #1D4ED8 !important; }
+.canvas-title { color: #111827; font-weight: 800; margin: 2px 0 6px; }
+
+/* ===== بطاقات المقاسات وسواتشات الخلفية ===== */
+#size_radio .wrap, #color_radio .wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+#size_radio label, #color_radio label { border: 1.5px solid #E2E8F0 !important; border-radius: 12px !important; padding: 9px 12px !important; background: #FFFFFF !important; color: #1E293B !important; font-weight: 700; cursor: pointer; transition: border-color .15s, background .15s; }
+#size_radio label:hover, #color_radio label:hover { border-color: #93C5FD !important; }
+#size_radio label:has(input:checked), #color_radio label:has(input:checked) { border-color: #2563EB !important; background: #EFF6FF !important; color: #1D4ED8 !important; box-shadow: inset 0 0 0 1px #2563EB; }
+#size_radio input, #color_radio input { accent-color: #2563EB; }
+#color_radio label::before { content: ""; display: inline-block; width: 16px; height: 16px; border-radius: 50%; margin-inline-end: 8px; vertical-align: -3px; border: 1px solid #CBD5E1; background: #FFFFFF; }
+#color_radio label:nth-of-type(2)::before { background: #438EDB; }
+#color_radio label:nth-of-type(3)::before { background: #A8C5E6; }
+#color_radio label:nth-of-type(4)::before { background: #F0F0F0; }
+#color_radio label:nth-of-type(5)::before { background: #D71E19; }
+#color_radio label:nth-of-type(6)::before { background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+
+/* ===== بطاقات النتائج ===== */
+.result-card { background: #FFFFFF !important; border: 1px solid #E2E8F0 !important; border-radius: 14px !important; padding: 10px 12px !important; box-shadow: 0 1px 3px rgba(15,23,42,.06); margin-top: 10px; }
+
+/* ===== شريط الإجراءات السفلي ===== */
+#actionbar { position: sticky; bottom: 0; z-index: 60; background: #FFFFFF !important; border-top: 2px solid #E2E8F0; box-shadow: 0 -6px 18px rgba(15,23,42,.08); padding: 10px 12px; border-radius: 14px 14px 0 0; margin-top: 14px; align-items: center; }
+#make-btn { font-size: 19px !important; padding: 14px !important; border-radius: 12px !important; font-weight: 800; }
+
+/* ===== الأعمدة ===== */
+@media (min-width: 1100px) {
+  #col_controls { flex: 0 0 350px !important; max-width: 350px; position: sticky; top: 10px; align-self: flex-start; max-height: calc(100vh - 20px); overflow-y: auto; padding-inline-end: 4px; }
+  #col_canvas { flex: 1 1 auto !important; min-width: 400px; }
+  #col_results { flex: 0 0 min(var(--wres, 40%), 560px) !important; max-width: 560px; min-width: 320px; }
+}
+#col_canvas img { border-radius: 10px; }
+
+/* ===== صناديق التمرير (القائمة والإشعارات) ===== */
+#photo_list_box { max-height: var(--listh, 340px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #2563EB #E2E8F0; }
 #photo_list_box > *, #notif_box > * { flex-shrink: 0 !important; }
 #photo_list_box::-webkit-scrollbar { width: 10px; }
-#photo_list_box::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
-#photo_list_box::-webkit-scrollbar-thumb { background: #0d9488; border-radius: 6px; }
-#notif_box { max-height: 480px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #0d9488 #1e293b; }
+#photo_list_box::-webkit-scrollbar-track { background: #E2E8F0; border-radius: 6px; }
+#photo_list_box::-webkit-scrollbar-thumb { background: #2563EB; border-radius: 6px; }
+#notif_box { max-height: 480px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #2563EB #E2E8F0; }
 #notif_box::-webkit-scrollbar { width: 10px; }
-#notif_box::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
-#notif_box::-webkit-scrollbar-thumb { background: #0d9488; border-radius: 6px; }
-#layout_style { display: none; }
+#notif_box::-webkit-scrollbar-track { background: #E2E8F0; border-radius: 6px; }
+#notif_box::-webkit-scrollbar-thumb { background: #2563EB; border-radius: 6px; }
+.result-card .block { border: 1px solid #E2E8F0 !important; }
+#col_canvas .block { border-color: #E2E8F0 !important; }
+#topbar .row > *:nth-child(1) { flex: 5 1 0% !important; }
+#topbar .row > *:nth-child(2) { flex: 2 1 0% !important; }
+#topbar .row > button { flex: 0 0 auto !important; width: auto !important; padding-left: 20px !important; padding-right: 20px !important; }
+
+/* ===== إصلاحات التخطيط العريض (غلاف Gradio يقيّد العرض افتراضياً) ===== */
+.gradio-container .app, .gradio-container .main { max-width: none !important; width: 100% !important; }
+.gradio-container .contain, .gradio-container .wrap { width: 100% !important; max-width: none !important; }
+.gradio-container { width: 100% !important; flex: 1 1 auto !important; align-self: stretch !important; }
+@media (min-width: 1100px) {
+  #main_row { flex-wrap: nowrap !important; }
+  #col_canvas { flex: 1 1 0% !important; min-width: 0 !important; }
+  #col_results { flex: 0 0 min(var(--wres, 40%), 520px) !important; max-width: 520px; }
+}
 """
 
 def _layout_style(page, split, listh):
@@ -1498,18 +1602,38 @@ def _layout_style(page, split, listh):
 
 S = SETTINGS
 
-with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
-    gr.HTML("""
-    <div id="app-title">
-      <h1>🇩🇿 صانع صور الهوية — الجزائر</h1>
-      <p>قصّ ذكي أو ضبط يدوي احترافي بأدلة قياس، جودة كاملة من صورتك الأصلية، وطباعة مباشرة — كل شيء على جهازك</p>
-    </div>
-    """)
-
+with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — الجزائر") as demo:
     layout_style = gr.HTML("", elem_id="layout_style")
     state = gr.State(None)
     watch_state = gr.State({"present": {}, "pending": {}, "seeded": False})
     photos_state = gr.State({"photos": db_list(), "notifs": []})
+    about_state = gr.State(False)
+
+    # ======== الشريط العلوي ========
+    with gr.Group(elem_id="topbar"):
+        with gr.Row():
+            gr.HTML("""
+            <div class="brand">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              <div>
+                <div class="brand-name">ID PHOTO STUDIO</div>
+                <div class="brand-sub">صانع صور الهوية — الجزائر</div>
+              </div>
+            </div>
+            """, scale=5)
+            gr.HTML("""
+            <div class="top-status"><span class="dot"></span> يعمل محلياً — صورك لا تغادر جهازك</div>
+            """, scale=2)
+            settings_btn = gr.Button("⚙ الإعدادات العامة", size="sm", variant="secondary", scale=1)
+            about_btn = gr.Button("ℹ حول البرنامج", size="sm", variant="secondary", scale=1)
+        with gr.Group(visible=False) as about_group:
+            gr.Markdown(
+                "**ID PHOTO STUDIO — صانع صور الهوية الاحترافي (الجزائر)**\n\n"
+                "قصّ ذكي بكشف الوجه وتصحيح الميلان، أو ضبط يدوي بأدلة قياس معتمدة، "
+                "بجودة كاملة من صورتك الأصلية. استقبال تلقائي من الكاميرا، سجل دائم "
+                "بقاعدة بيانات، وطباعة مباشرة — وكل شيء يعمل على جهازك بلا إنترنت.\n\n"
+                "المحرك مبني على مشروع HivisionIDPhotos مفتوح المصدر (رخصة Apache-2.0). "
+                "صُنع بواسطة **Zizo3114**.")
 
     # ======== إشعارات الصور الجديدة (تعيش 30 ثانية) ========
     notif_slots = []
@@ -1526,33 +1650,19 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
     _notif_ctx.__exit__(None, None, None)
 
 
-    with gr.Row():
-        # ======== لوحة التحكم (يمين الشاشة) ========
-        with gr.Column(scale=6, elem_id="col_controls"):
-            in_image = gr.Image(label="١ — ارفع صورتك", type="filepath",
-                                sources=["upload", "webcam"], height=280)
-            mode_radio = gr.Radio(MODES, value=S["mode"], label="٢ — وضع العمل")
-            out_preview = gr.Image(label="معاينة العمل (الأدلة هنا فقط — لا تظهر في النتائج أبداً)",
-                                   type="numpy", interactive=False, height=330,
-                                   visible=(S["mode"] == MODES[1]))
-            guide_md = gr.Markdown(
-                "دليل الأدلة (كما في القوالب المعتمدة): الأسهم الخضراء حول الصورة = الارتفاع والعرض الكليان، "
-                "وموضع الذقن من الأعلى، وبعد العينين عن الأسفل — بالمليمتر مع مجال التسامح. "
-                "وعلى الصورة: ضع قمة الرأس عند المنطقة الحمراء، والذقن عند الخط الأخضر، والعينين داخل الشريط الأزرق.",
-                visible=(S["mode"] == MODES[1]))
+    with gr.Row(elem_id="main_row"):
+        # ======== لوحة التحرير (يمين الشاشة) ========
+        with gr.Column(scale=5, elem_id="col_controls"):
+            mode_radio = gr.Radio(MODES, value=S["mode"], label="وضع العمل")
 
-            cut_head = gr.Button(_sec_label("✂️ القص والمقاس", S["ui_cut"]), elem_classes=["section-head"])
+            cut_head = gr.Button(_sec_label("📷 الصورة والمقاسات", S["ui_cut"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_cut"]) as cut_group:
-                size_radio = gr.Radio(list(SIZES.keys()), value=S["size"], label="مقاس الصورة")
+                size_radio = gr.Radio(list(SIZES.keys()), value=S["size"], label="مقاس الصورة", elem_id="size_radio")
                 with gr.Row(visible=(S["size"] == "مقاس مخصص…")) as custom_size_row:
                     custom_w = gr.Number(label="العرض (مم)", value=S["custom_w"], minimum=8, maximum=250)
                     custom_h = gr.Number(label="الارتفاع (مم)", value=S["custom_h"], minimum=8, maximum=250)
-                color_radio = gr.Radio(list(COLORS.keys()), value=S["color"], label="لون الخلفية")
-                custom_color = gr.ColorPicker(label="اختر لونك", value=S["custom_color"],
-                                              visible=(S["color"] == "لون مخصص…"))
                 with gr.Group(visible=(S["mode"] == MODES[0])) as auto_group:
                     align_chk = gr.Checkbox(label="تصحيح ميلان الوجه تلقائياً (حسب العينين)", value=S["align"])
-                    kb_num = gr.Number(label="حجم ملف مستهدف (KB) — 0 يعني أعلى جودة (يُضغط لهذه المرة فقط ولا يُحفظ)", value=0, minimum=0)
                 with gr.Group(visible=(S["mode"] == MODES[1])) as manual_group:
                     angle_slider = gr.Slider(-15, 15, value=S["angle"], step=0.1,
                                              label="تدوير الصورة (درجة) — لاستقامة الكتفين والرأس")
@@ -1566,7 +1676,13 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     center_btn = gr.Button("🎯 توسيط الوجه تلقائياً", size="sm")
                     reset_manual_btn = gr.Button("إعادة ضبط اليدوي", size="sm")
 
-            color_head = gr.Button(_sec_label("🎨 الألوان والإضاءة", S["ui_color"]), elem_classes=["section-head"])
+            bg_head = gr.Button(_sec_label("🎨 الخلفية", S["ui_bg"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_bg"]) as bg_group:
+                color_radio = gr.Radio(list(COLORS.keys()), value=S["color"], label="لون الخلفية", elem_id="color_radio")
+                custom_color = gr.ColorPicker(label="اختر لونك", value=S["custom_color"],
+                                              visible=(S["color"] == "لون مخصص…"))
+
+            color_head = gr.Button(_sec_label("✨ تحسين الصورة", S["ui_color"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_color"]) as color_group:
                 bright_s = gr.Slider(0.5, 1.5, value=S["brightness"], step=0.01, label="السطوع")
                 contrast_s = gr.Slider(0.5, 1.5, value=S["contrast"], step=0.01, label="التباين")
@@ -1575,7 +1691,12 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 shadows_s = gr.Slider(-100, 100, value=S["shadows"], step=1, label="الظلال (تفتيح المناطق الداكنة)")
                 highlights_s = gr.Slider(-100, 100, value=S["highlights"], step=1, label="الإبرازات (المناطق الفاتحة)")
                 temp_s = gr.Slider(-50, 50, value=S["temperature"], step=1, label="حرارة اللون (بارد ← دافئ)")
-                reset_color_btn = gr.Button("إعادة ضبط الألوان", size="sm")
+                reset_color_btn = gr.Button("إعادة ضبط التحسينات", size="sm")
+
+            quality_head = gr.Button(_sec_label("💎 الجودة وحجم الملف", S["ui_quality"]), elem_classes=["section-head"])
+            with gr.Group(visible=S["ui_quality"]) as quality_group:
+                kb_num = gr.Number(label="حجم ملف مستهدف (KB) — 0 يعني أعلى جودة (يُضغط لهذه المرة فقط ولا يُحفظ)", value=0, minimum=0)
+                gr.Markdown("التصدير دائماً بدقة 300 DPI وجودة كاملة من صورتك الأصلية؛ الضغط بالحجم المستهدف يخص عملية التصدير الحالية فقط.")
 
             paper_head = gr.Button(_sec_label("🖨 الورقة والطباعة", S["ui_paper"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_paper"]) as paper_group:
@@ -1583,9 +1704,9 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 with gr.Row():
                     print_photo_btn = gr.Button("🖨 طباعة الصورة", size="sm")
                     print_sheet_btn = gr.Button("🖨 طباعة الورقة المقسمة", size="sm")
-                gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة».")
+                gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة». معاينة الورقة في بطاقة «ورقة الطباعة» بمعرض النتائج.")
 
-            studio_head = gr.Button(_sec_label("📥 الاستوديو — الكاميرا والهاتف والطباعة المباشرة", S["ui_studio"]), elem_classes=["section-head"])
+            studio_head = gr.Button(_sec_label("📥 الاستوديو — الكاميرا والهاتف", S["ui_studio"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_studio"]) as studio_group:
                 inbox_txt = gr.Textbox(label="مجلد استقبال صور الكاميرا (نفس مجلد وجهة EOS Utility)",
                                        value=S["inbox"], placeholder="مثال: D:\\Studio\\Incoming")
@@ -1597,25 +1718,35 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     refresh_printers_btn = gr.Button("🔄 تحديث الطابعات", size="sm")
                     direct_sheet_btn = gr.Button("🖨 طباعة الورقة مباشرة", size="sm")
                     direct_photo_btn = gr.Button("🖨 طباعة الصورة مباشرة", size="sm")
+                gr.Markdown("من هاتفك (نفس الوايفاي): افتح عنوان الشبكة الذي يظهر في نافذة التشغيل عند بدء البرنامج.")
 
-            layout_head = gr.Button(_sec_label("📐 الواجهة والمقاسات", S["ui_layout"]), elem_classes=["section-head"])
+            layout_head = gr.Button(_sec_label("⚙ الإعدادات العامة", S["ui_layout"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_layout"]) as layout_group:
                 layout_page = gr.Slider(60, 100, value=S["layout_page"], step=1,
                                         label="عرض الصفحة على الشاشة (%) — 100 يعني ملء الشاشة بلا فراغات جانبية")
                 layout_split = gr.Slider(25, 65, value=S["layout_split"], step=1,
-                                         label="عرض عمود النتائج — الصور والقائمة (%) — الباقي يذهب للإعدادات")
+                                         label="عرض عمود النتائج — الصور والقائمة (%) — الباقي لمساحة العمل والتحرير")
                 layout_listh = gr.Slider(160, 800, value=S["layout_listh"], step=20,
                                          label="ارتفاع قائمة الصور (بكسل) — القائمة بداخلها سكرول")
                 gr.Markdown("تتطبق المقاسات فوراً أثناء السحب وتُحفظ تلقائياً — تحديث الصفحة لا يغيّرها.")
 
-            make_btn = gr.Button("اصنع صورة الهوية", variant="primary", elem_id="make-btn")
-            with gr.Row():
-                save_settings_btn = gr.Button("💾 احفظ إعداداتي", size="sm")
-                reset_settings_btn = gr.Button("↩️ إعادة ضبط الإعدادات", size="sm")
+        # ======== مساحة العمل (الوسط) ========
+        with gr.Column(scale=7, elem_id="col_canvas"):
+            gr.Markdown("### 🖼 مساحة العمل", elem_classes=["canvas-title"])
+            in_image = gr.Image(label="صورتك — اسحب وأفلت، أو اضغط للرفع، أو التقط من الكاميرا",
+                                type="filepath", sources=["upload", "webcam"], height=440)
+            out_preview = gr.Image(label="معاينة القص اليدوي (الأدلة هنا فقط — لا تظهر في النتائج أبداً)",
+                                   type="numpy", interactive=False, height=360,
+                                   visible=(S["mode"] == MODES[1]))
+            guide_md = gr.Markdown(
+                "دليل الأدلة (كما في القوالب المعتمدة): الأسهم الخضراء حول الصورة = الارتفاع والعرض الكليان، "
+                "وموضع الذقن من الأعلى، وبعد العينين عن الأسفل — بالمليمتر مع مجال التسامح. "
+                "وعلى الصورة: ضع قمة الرأس عند المنطقة الحمراء، والذقن عند الخط الأخضر، والعينين داخل الشريط الأزرق.",
+                visible=(S["mode"] == MODES[1]))
 
-        # ======== النتائج: ثلاث صور فقط ========
-        with gr.Column(scale=4, elem_id="col_results"):
-            list_head = gr.Button(_sec_label("🗂 قائمة الصور الواصلة", S["ui_list"]), elem_classes=["section-head"])
+        # ======== النتائج والسجل (يسار الشاشة) ========
+        with gr.Column(scale=5, elem_id="col_results"):
+            list_head = gr.Button(_sec_label("🗂 السجل والمعرض", S["ui_list"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_list"]) as list_group:
                 photo_rows = []
               # (الصفوف تُنشأ داخل صندوق التمرير أدناه)
@@ -1634,11 +1765,24 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                 gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة. زر «🗑 حذف» يزيل السجل من القائمة فقط — ملف الصورة في مجلد الكاميرا لا يُمسّ.")
                 unignore_btn = gr.Button("↩ إظهار الصور المحذوفة من القائمة", size="sm", variant="secondary")
 
-            out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=330)
-            out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=250)
-            out_sheet = gr.Image(label="ورقة الطباعة", type="numpy", interactive=False, height=250)
-            out_status = gr.Textbox(label="الحالة", interactive=False)
-            out_files = gr.File(label="تنزيل الملفات (JPG بدقة 300 DPI)", file_count="multiple")
+            gr.Markdown("### 📤 معرض النتائج", elem_classes=["canvas-title"])
+            with gr.Group(elem_classes=["result-card"]):
+                gr.Markdown("**الصورة القياسية** — JPG بدقة 300 DPI")
+                out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=300, show_label=False)
+            with gr.Group(elem_classes=["result-card"]):
+                gr.Markdown("**نسخة عالية الدقة** — تفاصيل أوضح للطباعة الكبيرة")
+                out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=220, show_label=False)
+            with gr.Group(elem_classes=["result-card"]):
+                gr.Markdown("**ورقة الطباعة** — قصّ على الخطوط المتقطعة")
+                out_sheet = gr.Image(label="ورقة الطباعة", type="numpy", interactive=False, height=220, show_label=False)
+            out_files = gr.File(label="تصدير النتائج — تنزيل الملفات (JPG بدقة 300 DPI)", file_count="multiple")
+
+    # ======== شريط الإجراءات السفلي ========
+    with gr.Row(elem_id="actionbar"):
+        make_btn = gr.Button("✂ اصنع صورة الهوية", variant="primary", elem_id="make-btn", scale=2)
+        save_settings_btn = gr.Button("💾 احفظ إعداداتي", scale=1)
+        reset_settings_btn = gr.Button("↩️ إعادة ضبط الإعدادات", scale=1)
+        out_status = gr.Textbox(label="الحالة", interactive=False, scale=4)
 
     # ---------- حفظ الإعدادات (بمنع التكرار داخل save_settings_dict) ----------
     SETTINGS_KEYS = ["mode", "size", "custom_w", "custom_h", "color", "custom_color",
@@ -1661,13 +1805,15 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
         _c.change(_persist, inputs=SETTINGS_INPUTS, outputs=None)
 
     # ---------- أقسام قابلة للطي بحالة محفوظة ----------
-    SECTION_DEFS = [("ui_cut", cut_head, cut_group, "✂️ القص والمقاس"),
-                    ("ui_color", color_head, color_group, "🎨 الألوان والإضاءة"),
+    SECTION_DEFS = [("ui_cut", cut_head, cut_group, "📷 الصورة والمقاسات"),
+                    ("ui_bg", bg_head, bg_group, "🎨 الخلفية"),
+                    ("ui_color", color_head, color_group, "✨ تحسين الصورة"),
+                    ("ui_quality", quality_head, quality_group, "💎 الجودة وحجم الملف"),
                     ("ui_paper", paper_head, paper_group, "🖨 الورقة والطباعة"),
                     ("ui_studio", studio_head, studio_group,
-                     "📥 الاستوديو — الكاميرا والهاتف والطباعة المباشرة"),
-                    ("ui_list", list_head, list_group, "🗂 قائمة الصور الواصلة"),
-                    ("ui_layout", layout_head, layout_group, "📐 الواجهة والمقاسات")]
+                     "📥 الاستوديو — الكاميرا والهاتف"),
+                    ("ui_list", list_head, list_group, "🗂 السجل والمعرض"),
+                    ("ui_layout", layout_head, layout_group, "⚙ الإعدادات العامة")]
     SECTION_OUTS = []
     for _k, _h, _g, _t in SECTION_DEFS:
         SECTION_OUTS += [_g, _h]
@@ -1690,6 +1836,15 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
 
     for _k, _h, _g, _t in SECTION_DEFS:
         _h.click(_mk_toggle(_k, _t), inputs=None, outputs=[_g, _h])
+
+    settings_btn.click(_mk_toggle("ui_layout", "⚙ الإعدادات العامة"),
+                       inputs=None, outputs=[layout_group, layout_head])
+
+    def _about_toggle(v):
+        return gr.update(visible=not v), not v
+
+    about_btn.click(_about_toggle, inputs=about_state,
+                    outputs=[about_group, about_state])
 
     def _apply_layout(page, split, listh):
         return gr.update(value=_layout_style(page, split, listh))
@@ -1960,5 +2115,5 @@ if __name__ == "__main__":
     print("الهاتف (نفس الوايفاي): http://" + str(_lan_ip()) + ":<المنفذ الظاهر أسفله>")
     demo.launch(inbrowser=True, server_name="0.0.0.0", server_port=_free_port(),
                 auth=_auth,
-                theme=gr.themes.Soft(primary_hue="emerald", neutral_hue="slate"),
+                theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
                 css=CUSTOM_CSS)
