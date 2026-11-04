@@ -27,9 +27,10 @@ if not exist .venv\Scripts\python.exe (
 )
 set VPY=.venv\Scripts\python.exe
 
-REM ---------- تثبيت المكتبات أول مرة ----------
-if not exist .venv\.installed (
-  echo تثبيت المكتبات - قد يأخذ بضع دقائق أول مرة...
+REM ---------- تثبيت المكتبات + تحديثها تلقائيا عند تغيّر requirements.txt ----------
+%VPY% -c "import hashlib,os,sys; h=hashlib.md5(open('requirements.txt','rb').read()).hexdigest(); old=open('.venv/.reqhash').read().strip() if os.path.exists('.venv/.reqhash') else ''; sys.exit(0 if h==old else 1)" >nul 2>&1
+if errorlevel 1 (
+  echo تثبيت/تحديث المكتبات - قد يأخذ بضع دقائق...
   %VPY% -m pip install --upgrade pip
   %VPY% -m pip install --prefer-binary -r requirements.txt
   if errorlevel 1 (
@@ -40,7 +41,8 @@ if not exist .venv\.installed (
     pause
     exit /b 1
   )
-  echo ok> .venv\.installed
+  %VPY% -c "import hashlib; open('.venv/.reqhash','w').write(hashlib.md5(open('requirements.txt','rb').read()).hexdigest())"
+  echo ok> .venv\\.installed
 )
 
 REM ---------- التأكد من وجود نموذج إزالة الخلفية ----------

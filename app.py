@@ -93,7 +93,7 @@ DEFAULT_SETTINGS = {
     "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "sharpness": 1.0,
     "shadows": 0, "highlights": 0, "temperature": 0,
     "inbox": "", "watch": False, "automake": False, "printer": "",
-    "ui_cut": True, "ui_bg": True, "ui_color": False, "ui_quality": False,
+    "ui_cut": True, "ui_bg": False, "ui_color": False, "ui_quality": False,
     "ui_paper": False,
     "ui_studio": False, "ui_list": True, "ui_layout": False,
     "layout_page": 100, "layout_split": 40, "layout_listh": 340,
@@ -1465,127 +1465,218 @@ CUSTOM_CSS = """@import url('https://fonts.googleapis.com/css2?family=Cairo:wght
   direction: rtl;
   font-family: 'Cairo', Tahoma, 'Segoe UI', sans-serif;
   color-scheme: light;
-  --body-background-fill: #F1F5F9;
-  --body-text-color: #111827;
+  --body-background-fill: #F4F5F7;
+  --body-text-color: #1F2937;
   --block-background-fill: #FFFFFF;
-  --block-border-color: #E2E8F0;
+  --block-border-color: #E3E6EA;
   --block-label-background-fill: #F8FAFC;
-  --block-label-text-color: #475569;
+  --block-label-text-color: #6B7280;
   --block-title-text-color: #111827;
   --input-background-fill: #FFFFFF;
-  --input-border-color: #CBD5E1;
-  --input-placeholder-color: #94A3B8;
-  --color-accent: #2563EB;
-  --border-color-primary: #E2E8F0;
-  --border-color-accent: #BFDBFE;
+  --input-border-color: #D8DCE2;
+  --input-placeholder-color: #9CA3AF;
+  --input-shadow: none;
+  --checkbox-border-color: #CBD5E1;
+  --checkbox-label-text-color: #1F2937;
+  --checkbox-label-text-color-selected: #1D4ED8;
+  --checkbox-background-color: #FFFFFF;
+  --checkbox-background-color-hover: #F8FAFC;
+  --checkbox-background-color-selected: #EFF6FF;
+  --checkbox-label-background-fill: #FFFFFF;
+  --checkbox-label-background-fill-hover: #F8FAFC;
+  --checkbox-label-background-fill-selected: #EFF6FF;
+  --checkbox-border-color-selected: #2563EB;
+  --radio-circle-fill: #2563EB;
   --slider-color: #2563EB;
+  --color-accent: #2563EB;
+  --color-accent-soft: #EFF6FF;
+  --border-color-primary: #E3E6EA;
+  --border-color-accent: #BFDBFE;
+  --border-color-accent-subdued: #DBEAFE;
+  --shadow-drop: none;
+  --shadow-drop-lg: 0 1px 3px rgba(17,24,39,.06);
   --button-primary-background-fill: #2563EB;
   --button-primary-background-fill-hover: #1D4ED8;
   --button-primary-text-color: #FFFFFF;
   --button-primary-border-color: #2563EB;
   --button-secondary-background-fill: #FFFFFF;
-  --button-secondary-background-fill-hover: #F1F5F9;
-  --button-secondary-text-color: #1E293B;
-  --button-secondary-border-color: #CBD5E1;
-  --checkbox-background-color: #FFFFFF;
-  --checkbox-label-text-color: #1E293B;
-  --checkbox-border-color: #CBD5E1;
-  --checkbox-label-background-fill: #F8FAFC;
-  --checkbox-label-background-fill-hover: #EFF6FF;
-  --checkbox-label-background-fill-selected: #EFF6FF;
-  --checkbox-label-text-color-selected: #1D4ED8;
-  --shadow-drop: 0 1px 3px rgba(15, 23, 42, 0.08);
-  background: #F1F5F9;
+  --button-secondary-background-fill-hover: #F8FAFC;
+  --button-secondary-text-color: #374151;
+  --button-secondary-border-color: #D8DCE2;
+  --link-text-color: #2563EB;
+  --table-text-color: #1F2937;
+  margin: 0 auto;
+  width: min(var(--pagew, 100%), 100%);
+  max-width: none;
 }
-body.dark .gradio-container, .dark .gradio-container {
-  --body-background-fill: #F1F5F9;
-  --body-text-color: #111827;
+body.dark.gradio-container {
+  --body-background-fill: #F4F5F7;
+  --body-text-color: #1F2937;
   --block-background-fill: #FFFFFF;
-  --block-border-color: #E2E8F0;
+  --block-border-color: #E3E6EA;
   --block-label-background-fill: #F8FAFC;
-  --block-label-text-color: #475569;
+  --block-label-text-color: #6B7280;
   --block-title-text-color: #111827;
   --input-background-fill: #FFFFFF;
-  --input-border-color: #CBD5E1;
-  --body-text-color-subdued: #64748B;
-  background: #F1F5F9;
-  color: #111827;
+  --input-border-color: #D8DCE2;
+  --checkbox-label-text-color: #1F2937;
+  --checkbox-label-text-color-selected: #1D4ED8;
+  --checkbox-background-color: #FFFFFF;
+  --checkbox-label-background-fill: #FFFFFF;
+  --checkbox-label-background-fill-selected: #EFF6FF;
+  --table-text-color: #1F2937;
+  --button-secondary-background-fill: #FFFFFF;
+  --button-secondary-text-color: #374151;
 }
-.gradio-container { max-width: var(--pagew, 100%) !important; margin-left: auto !important; margin-right: auto !important; }
-footer { display: none !important; }
-#layout_style { display: none; }
+.gradio-container.app, .gradio-container .main {
+  max-width: none !important; width: 100% !important; margin: 0 auto !important;
+}
+.gradio-container .contain, .gradio-container .wrap {
+  max-width: none !important; width: 100% !important;
+}
+.gradio-container {
+  width: 100% !important; flex: 1 1 auto !important; min-width: 0 !important;
+  padding: 10px 14px 18px !important;
+}
+.gradio-container .block {
+  border: 1px solid #E3E6EA; border-radius: 10px;
+  box-shadow: none; background: #FFFFFF;
+}
+.gradio-container footer { display: none !important; }
+#layout_style { display: none !important; }
 
-/* ===== الشريط العلوي ===== */
-#topbar { background: #111827 !important; border: none !important; border-radius: 16px !important; padding: 10px 18px !important; box-shadow: 0 4px 14px rgba(15,23,42,.18); }
+/* ---------- الشريط العلوي: أبيض هادئ ---------- */
+#topbar {
+  background: #FFFFFF !important; border: 1px solid #E3E6EA !important;
+  border-radius: 12px; padding: 8px 16px; margin-bottom: 12px;
+}
 #topbar * { background-color: transparent !important; }
 #topbar .brand { display: flex; align-items: center; gap: 12px; }
-#topbar .brand-name { color: #FFFFFF; font-weight: 800; font-size: 20px; letter-spacing: .4px; line-height: 1.1; }
-#topbar .brand-sub { color: #94A3B8; font-size: 13px; font-weight: 600; }
-#topbar .top-status { color: #A7F3D0; font-size: 13px; font-weight: 700; text-align: center; padding-top: 12px; }
-#topbar .top-status .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background-color: #10B981 !important; margin-inline-end: 6px; box-shadow: 0 0 0 3px rgba(16,185,129,.25); }
-#topbar button { background: #1F2937 !important; color: #E5E7EB !important; border: 1px solid #374151 !important; }
-#topbar button:hover { background: #374151 !important; }
-#topbar .gr-group, #topbar .block { background: transparent !important; border-color: #374151 !important; color: #E5E7EB !important; }
+#topbar .brand-name { font-size: 21px; font-weight: 800; color: #111827; letter-spacing: .4px; line-height: 1.15; }
+#topbar .brand-sub { font-size: 13px; color: #6B7280; margin-top: 1px; }
+#topbar .top-status {
+  display: flex; align-items: center; color: #047857; font-weight: 600; font-size: 14px;
+}
+#topbar .top-status .dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  background-color: #10B981 !important; margin-inline-end: 7px;
+  box-shadow: 0 0 0 3px rgba(16,185,129,.18);
+}
+#topbar button {
+  border: 1px solid #E3E6EA !important; background: #FFFFFF !important; color: #374151 !important;
+  border-radius: 8px !important; font-weight: 600;
+}
+#topbar button:hover { background: #F8FAFC !important; }
 
-/* ===== عناوين الأقسام (أكورديون) ===== */
-.section-head { margin-top: 10px; }
-.section-head button { justify-content: flex-start; font-weight: 700; font-size: 15px; background: #FFFFFF !important; color: #111827 !important; border: 1px solid #E2E8F0 !important; border-radius: 12px !important; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
-.section-head button:hover { border-color: #2563EB !important; color: #1D4ED8 !important; }
-.canvas-title { color: #111827; font-weight: 800; margin: 2px 0 6px; }
+/* ---------- الصف الرئيسي والأعمدة ---------- */
+#main_row { gap: 14px; align-items: flex-start; }
+#col_controls, #col_canvas, #col_results {
+  background: transparent !important; border: none !important; box-shadow: none !important;
+}
+.canvas-title { color: #374151; font-weight: 700; }
+.canvas-title h3 { font-size: 16px !important; margin: 2px 0 8px !important; color: #374151 !important; }
 
-/* ===== بطاقات المقاسات وسواتشات الخلفية ===== */
-#size_radio .wrap, #color_radio .wrap { display: flex; flex-wrap: wrap; gap: 8px; }
-#size_radio label, #color_radio label { border: 1.5px solid #E2E8F0 !important; border-radius: 12px !important; padding: 9px 12px !important; background: #FFFFFF !important; color: #1E293B !important; font-weight: 700; cursor: pointer; transition: border-color .15s, background .15s; }
-#size_radio label:hover, #color_radio label:hover { border-color: #93C5FD !important; }
-#size_radio label:has(input:checked), #color_radio label:has(input:checked) { border-color: #2563EB !important; background: #EFF6FF !important; color: #1D4ED8 !important; box-shadow: inset 0 0 0 1px #2563EB; }
-#size_radio input, #color_radio input { accent-color: #2563EB; }
-#color_radio label::before { content: ""; display: inline-block; width: 16px; height: 16px; border-radius: 50%; margin-inline-end: 8px; vertical-align: -3px; border: 1px solid #CBD5E1; background: #FFFFFF; }
+/* لوحة الإعدادات: بطاقة بيضاء واحدة بتمرير داخلي */
+#col_controls {
+  background: #FFFFFF !important; border: 1px solid #E3E6EA !important; border-radius: 12px;
+  padding: 10px 12px;
+}
+.section-head {
+  justify-content: space-between !important; text-align: start !important;
+  background: #FFFFFF !important; color: #111827 !important;
+  border: none !important; border-bottom: 1px solid #EEF1F4 !important;
+  border-radius: 0 !important; box-shadow: none !important;
+  font-weight: 700 !important; font-size: 15px !important;
+  padding: 11px 6px !important; min-height: 0 !important;
+}
+.section-head:hover { background: #F8FAFC !important; color: #2563EB !important; }
+
+/* خيارات المقاس واللون: قائمة بسيطة، ونقطة لون صغيرة وظيفية */
+#size_radio label, #color_radio label {
+  border: 1px solid #E3E6EA !important; background: #FFFFFF !important;
+  border-radius: 8px !important; padding: 7px 10px !important;
+  font-weight: 600; color: #1F2937;
+}
+#size_radio label:has(input:checked), #color_radio label:has(input:checked) {
+  border-color: #2563EB !important; background: #EFF6FF !important;
+}
+#color_radio label::before {
+  content: ""; display: inline-block; width: 13px; height: 13px; border-radius: 50%;
+  margin-inline-end: 7px; vertical-align: -2px; border: 1px solid rgba(17,24,39,.18);
+  background: #FFFFFF;
+}
 #color_radio label:nth-of-type(2)::before { background: #438EDB; }
 #color_radio label:nth-of-type(3)::before { background: #A8C5E6; }
 #color_radio label:nth-of-type(4)::before { background: #F0F0F0; }
 #color_radio label:nth-of-type(5)::before { background: #D71E19; }
-#color_radio label:nth-of-type(6)::before { background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+#color_radio label:nth-of-type(6)::before { background: conic-gradient(#F59E0B, #10B981, #3B82F6, #EF4444, #F59E0B); }
 
-/* ===== بطاقات النتائج ===== */
-.result-card { background: #FFFFFF !important; border: 1px solid #E2E8F0 !important; border-radius: 14px !important; padding: 10px 12px !important; box-shadow: 0 1px 3px rgba(15,23,42,.06); margin-top: 10px; }
-
-/* ===== شريط الإجراءات السفلي ===== */
-#actionbar { position: sticky; bottom: 0; z-index: 60; background: #FFFFFF !important; border-top: 2px solid #E2E8F0; box-shadow: 0 -6px 18px rgba(15,23,42,.08); padding: 10px 12px; border-radius: 14px 14px 0 0; margin-top: 14px; align-items: center; }
-#make-btn { font-size: 19px !important; padding: 14px !important; border-radius: 12px !important; font-weight: 800; }
-
-/* ===== الأعمدة ===== */
-@media (min-width: 1100px) {
-  #col_controls { flex: 0 0 350px !important; max-width: 350px; flex-wrap: nowrap !important; position: sticky; top: 10px; align-self: flex-start; max-height: calc(100vh - 20px); overflow-y: auto; padding-inline-end: 4px; }
-#col_controls > * { flex-shrink: 0 !important; }
-  #col_canvas { flex: 1 1 auto !important; min-width: 400px; }
-  #col_results { flex: 0 0 min(var(--wres, 40%), 560px) !important; max-width: 560px; min-width: 320px; }
+/* قائمة الطابعات: نص داكن على أبيض دائماً */
+#col_controls select, #col_controls [data-testid="dropdown"] input {
+  color: #111827 !important; background: #FFFFFF !important;
 }
-#col_canvas img { border-radius: 10px; }
 
-/* ===== صناديق التمرير (القائمة والإشعارات) ===== */
-#photo_list_box { max-height: var(--listh, 340px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #2563EB #E2E8F0; }
+/* ---------- مساحة العمل وزر الإنشاء ---------- */
+#col_canvas .block { border-radius: 12px; }
+#make-btn {
+  width: 100%; min-height: 54px; margin-top: 10px;
+  font-size: 19px !important; font-weight: 800 !important;
+  border-radius: 10px !important;
+}
+#status_box .block, #status_box textarea {
+  background: #F8FAFC !important; border-color: #E3E6EA !important;
+}
+
+/* ---------- النتائج والسجل ---------- */
+.result-panel {
+  background: #FFFFFF !important; border: 1px solid #E3E6EA !important;
+  border-radius: 12px; padding: 10px 12px 12px; margin-bottom: 12px;
+}
+.result-panel .block { border-color: #E3E6EA !important; }
+.result-panel p { color: #374151; font-size: 14px; margin: 0 0 8px; }
+
+/* صناديق التمرير المستقلة (القائمة والإشعارات) */
+#photo_list_box, #notif_box {
+  overflow-y: auto; overflow-x: hidden; padding-inline-end: 4px;
+  scrollbar-width: thin; scrollbar-color: #C3CAD2 #F1F3F5;
+}
+#photo_list_box { max-height: var(--listh, 340px); }
+#notif_box { max-height: 480px; margin-bottom: 10px; }
 #photo_list_box > *, #notif_box > * { flex-shrink: 0 !important; }
-#photo_list_box::-webkit-scrollbar { width: 10px; }
-#photo_list_box::-webkit-scrollbar-track { background: #E2E8F0; border-radius: 6px; }
-#photo_list_box::-webkit-scrollbar-thumb { background: #2563EB; border-radius: 6px; }
-#notif_box { max-height: 480px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #2563EB #E2E8F0; }
-#notif_box::-webkit-scrollbar { width: 10px; }
-#notif_box::-webkit-scrollbar-track { background: #E2E8F0; border-radius: 6px; }
-#notif_box::-webkit-scrollbar-thumb { background: #2563EB; border-radius: 6px; }
-.result-card .block { border: 1px solid #E2E8F0 !important; }
-#col_canvas .block { border-color: #E2E8F0 !important; }
-#topbar .row > *:nth-child(1) { flex: 5 1 0% !important; }
-#topbar .row > *:nth-child(2) { flex: 2 1 0% !important; }
-#topbar .row > button { flex: 0 0 auto !important; width: auto !important; padding-left: 20px !important; padding-right: 20px !important; }
+#photo_list_box::-webkit-scrollbar, #notif_box::-webkit-scrollbar,
+#col_controls::-webkit-scrollbar { width: 8px; }
+#photo_list_box::-webkit-scrollbar-thumb, #notif_box::-webkit-scrollbar-thumb,
+#col_controls::-webkit-scrollbar-thumb { background: #C3CAD2; border-radius: 8px; }
+#photo_list_box::-webkit-scrollbar-track, #notif_box::-webkit-scrollbar-track,
+#col_controls::-webkit-scrollbar-track { background: #F1F3F5; }
 
-/* ===== إصلاحات التخطيط العريض (غلاف Gradio يقيّد العرض افتراضياً) ===== */
-.gradio-container .app, .gradio-container .main { max-width: none !important; width: 100% !important; }
-.gradio-container .contain, .gradio-container .wrap { width: 100% !important; max-width: none !important; }
-.gradio-container { width: 100% !important; flex: 1 1 auto !important; align-self: stretch !important; }
+/* ---------- الشاشات الواسعة ---------- */
 @media (min-width: 1100px) {
   #main_row { flex-wrap: nowrap !important; }
-  #col_canvas { flex: 1 1 0% !important; min-width: 0 !important; }
+  #col_controls {
+    flex: 0 0 350px !important; max-width: 350px; flex-wrap: nowrap !important;
+    position: sticky; top: 10px; align-self: flex-start;
+    max-height: calc(100vh - 20px); overflow-y: auto;
+  }
+  #col_controls > * { flex-shrink: 0 !important; }
+  #col_canvas { flex: 1 1 0% !important; min-width: 0; }
   #col_results { flex: 0 0 min(var(--wres, 40%), 520px) !important; max-width: 520px; }
+}
+
+/* ---------- الشاشات الضيقة: مساحة العمل أولاً وزر الإنشاء ثابت أسفلها ---------- */
+@media (max-width: 1099px) {
+  #main_row > #col_canvas { order: -1 !important; }
+  #make-btn { position: sticky; bottom: 8px; z-index: 20; box-shadow: 0 4px 14px rgba(37,99,235,.25); }
+}
+@media (max-width: 700px) {
+  #topbar { padding: 8px 10px; }
+  #topbar .top-status { display: none !important; }
+  #topbar .brand svg { display: none; }
+  #topbar .brand-name { font-size: 15px; white-space: nowrap; }
+  #topbar .brand-sub { font-size: 11px; white-space: nowrap; }
+  #topbar button { min-width: 0 !important; padding: 4px 6px !important; font-size: 12px !important; }
+  #topbar_row { flex-wrap: wrap !important; row-gap: 6px; }
+  #topbar_row > * { flex: 1 1 42% !important; min-width: 0 !important; }
 }
 """
 
@@ -1614,10 +1705,10 @@ with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — ال�
 
     # ======== الشريط العلوي ========
     with gr.Group(elem_id="topbar"):
-        with gr.Row():
+        with gr.Row(elem_id="topbar_row"):
             gr.HTML("""
             <div class="brand">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
               <div>
                 <div class="brand-name">ID PHOTO STUDIO</div>
                 <div class="brand-sub">صانع صور الهوية — الجزائر</div>
@@ -1654,7 +1745,7 @@ with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — ال�
 
 
     with gr.Row(elem_id="main_row"):
-        # ======== لوحة التحرير (يمين الشاشة) ========
+        # ======== لوحة الإعدادات (يمين الشاشة) ========
         with gr.Column(scale=5, elem_id="col_controls"):
             mode_radio = gr.Radio(MODES, value=S["mode"], label="وضع العمل")
 
@@ -1707,7 +1798,7 @@ with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — ال�
                 with gr.Row():
                     print_photo_btn = gr.Button("🖨 طباعة الصورة", size="sm")
                     print_sheet_btn = gr.Button("🖨 طباعة الورقة المقسمة", size="sm")
-                gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة». معاينة الورقة في بطاقة «ورقة الطباعة» بمعرض النتائج.")
+                gr.Markdown("الطباعة بحجم حقيقي (100%) — عند الطباعة اختر «الحجم الفعلي» ولا تختر «ملء الصفحة». معاينة الورقة في «ورقة الطباعة» بمعرض النتائج.")
 
             studio_head = gr.Button(_sec_label("📥 الاستوديو — الكاميرا والهاتف", S["ui_studio"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_studio"]) as studio_group:
@@ -1721,7 +1812,15 @@ with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — ال�
                     refresh_printers_btn = gr.Button("🔄 تحديث الطابعات", size="sm")
                     direct_sheet_btn = gr.Button("🖨 طباعة الورقة مباشرة", size="sm")
                     direct_photo_btn = gr.Button("🖨 طباعة الصورة مباشرة", size="sm")
-                gr.Markdown("من هاتفك (نفس الوايفاي): افتح عنوان الشبكة الذي يظهر في نافذة التشغيل عند بدء البرنامج.")
+                gr.Markdown(
+                    "**ربط الكاميرا:**\n"
+                    "1. صوّر بصيغة JPEG (صور RAW بصيغة CR3 لا تُقرأ).\n"
+                    "2. في برنامج EOS Utility اجعل مجلد الوجهة هو نفس المجلد المكتوب أعلاه.\n"
+                    "3. فعّل «مراقبة المجلد» — كل صورة جديدة تصل تظهر في السجل تلقائياً.\n\n"
+                    "**من الهاتف:**\n"
+                    "1. الهاتف والحاسوب على نفس شبكة الوايفاي.\n"
+                    "2. افتح من متصفح الهاتف العنوان الذي يظهر في نافذة التشغيل السوداء عند بدء البرنامج (مثال: http://192.168.1.7:7860).\n"
+                    "3. إن لم يفتح العنوان، شغّل ملف allow-phone.bat مرة واحدة كمسؤول ثم أعد المحاولة.")
 
             layout_head = gr.Button(_sec_label("⚙ الإعدادات العامة", S["ui_layout"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_layout"]) as layout_group:
@@ -1733,11 +1832,11 @@ with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — ال�
                                          label="ارتفاع قائمة الصور (بكسل) — القائمة بداخلها سكرول")
                 gr.Markdown("تتطبق المقاسات فوراً أثناء السحب وتُحفظ تلقائياً — تحديث الصفحة لا يغيّرها.")
 
-        # ======== مساحة العمل (الوسط) ========
+        # ======== مساحة العمل (الوسط): الصورة أولاً وزر الإنشاء تحتها مباشرة ========
         with gr.Column(scale=7, elem_id="col_canvas"):
-            gr.Markdown("### 🖼 مساحة العمل", elem_classes=["canvas-title"])
+            gr.Markdown("### مساحة العمل", elem_classes=["canvas-title"])
             in_image = gr.Image(label="صورتك — اسحب وأفلت، أو اضغط للرفع، أو التقط من الكاميرا",
-                                type="filepath", sources=["upload", "webcam"], height=440)
+                                type="filepath", sources=["upload", "webcam"], height=470)
             out_preview = gr.Image(label="معاينة القص اليدوي (الأدلة هنا فقط — لا تظهر في النتائج أبداً)",
                                    type="numpy", interactive=False, height=360,
                                    visible=(S["mode"] == MODES[1]))
@@ -1746,9 +1845,26 @@ with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — ال�
                 "وموضع الذقن من الأعلى، وبعد العينين عن الأسفل — بالمليمتر مع مجال التسامح. "
                 "وعلى الصورة: ضع قمة الرأس عند المنطقة الحمراء، والذقن عند الخط الأخضر، والعينين داخل الشريط الأزرق.",
                 visible=(S["mode"] == MODES[1]))
+            make_btn = gr.Button("✂ اصنع صورة الهوية", variant="primary", elem_id="make-btn")
+            with gr.Row():
+                save_settings_btn = gr.Button("💾 احفظ إعداداتي", variant="secondary", size="sm", scale=1)
+                reset_settings_btn = gr.Button("↩️ إعادة ضبط الإعدادات", variant="secondary", size="sm", scale=1)
+            out_status = gr.Textbox(label="الحالة", interactive=False, elem_id="status_box")
 
         # ======== النتائج والسجل (يسار الشاشة) ========
         with gr.Column(scale=5, elem_id="col_results"):
+            gr.Markdown("### النتائج", elem_classes=["canvas-title"])
+            with gr.Group(elem_classes=["result-panel"]):
+                gr.Markdown("**الصورة القياسية** — JPG بدقة 300 DPI")
+                out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=340, show_label=False)
+            with gr.Group(elem_classes=["result-panel"]):
+                gr.Markdown("**نسخة عالية الدقة** — تفاصيل أوضح للطباعة الكبيرة")
+                out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=280, show_label=False)
+            with gr.Group(elem_classes=["result-panel"]):
+                gr.Markdown("**ورقة الطباعة** — قصّ على الخطوط المتقطعة")
+                out_sheet = gr.Image(label="ورقة الطباعة", type="numpy", interactive=False, height=280, show_label=False)
+            out_files = gr.File(label="تصدير النتائج — تنزيل الملفات (JPG بدقة 300 DPI)", file_count="multiple")
+
             list_head = gr.Button(_sec_label("🗂 السجل والمعرض", S["ui_list"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_list"]) as list_group:
                 photo_rows = []
@@ -1767,25 +1883,6 @@ with gr.Blocks(title="ID PHOTO STUDIO — صانع صور الهوية — ال�
                 _rows_ctx.__exit__(None, None, None)
                 gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة. زر «🗑 حذف» يزيل السجل من القائمة فقط — ملف الصورة في مجلد الكاميرا لا يُمسّ.")
                 unignore_btn = gr.Button("↩ إظهار الصور المحذوفة من القائمة", size="sm", variant="secondary")
-
-            gr.Markdown("### 📤 معرض النتائج", elem_classes=["canvas-title"])
-            with gr.Group(elem_classes=["result-card"]):
-                gr.Markdown("**الصورة القياسية** — JPG بدقة 300 DPI")
-                out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=300, show_label=False)
-            with gr.Group(elem_classes=["result-card"]):
-                gr.Markdown("**نسخة عالية الدقة** — تفاصيل أوضح للطباعة الكبيرة")
-                out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=220, show_label=False)
-            with gr.Group(elem_classes=["result-card"]):
-                gr.Markdown("**ورقة الطباعة** — قصّ على الخطوط المتقطعة")
-                out_sheet = gr.Image(label="ورقة الطباعة", type="numpy", interactive=False, height=220, show_label=False)
-            out_files = gr.File(label="تصدير النتائج — تنزيل الملفات (JPG بدقة 300 DPI)", file_count="multiple")
-
-    # ======== شريط الإجراءات السفلي ========
-    with gr.Row(elem_id="actionbar"):
-        make_btn = gr.Button("✂ اصنع صورة الهوية", variant="primary", elem_id="make-btn", scale=2)
-        save_settings_btn = gr.Button("💾 احفظ إعداداتي", scale=1)
-        reset_settings_btn = gr.Button("↩️ إعادة ضبط الإعدادات", scale=1)
-        out_status = gr.Textbox(label="الحالة", interactive=False, scale=4)
 
     # ---------- حفظ الإعدادات (بمنع التكرار داخل save_settings_dict) ----------
     SETTINGS_KEYS = ["mode", "size", "custom_w", "custom_h", "color", "custom_color",
