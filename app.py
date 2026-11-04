@@ -867,6 +867,30 @@ def db_ignored_fps():
         return set()
 
 
+def db_unignore(fp):
+    """إلغاء تجاهل بصمة واحدة (رجعت صورتها بعد غياب — تُعامل كوافد جديد)."""
+    con = _db_connect()
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS ignored(fp TEXT PRIMARY KEY, at TEXT)")
+        con.execute("DELETE FROM ignored WHERE fp=?", (fp,))
+        con.commit()
+    finally:
+        con.close()
+
+
+def db_clear_ignored():
+    """إلغاء تجاهل كل الصور المحذوفة من القائمة — يعيد عددها."""
+    con = _db_connect()
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS ignored(fp TEXT PRIMARY KEY, at TEXT)")
+        n = con.execute("SELECT COUNT(*) FROM ignored").fetchone()[0]
+        con.execute("DELETE FROM ignored")
+        con.commit()
+        return n
+    finally:
+        con.close()
+
+
 def db_list(limit=60):
     """أحدث الصور المسجلة (الأحدث أولاً) كقواميس جاهزة للعرض."""
     try:
@@ -1097,6 +1121,9 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
     ws = dict(wstate or {})
     present = dict(ws.get("present") or {})
     pending = dict(ws.get("pending") or {})
+    ign_present = dict(ws.get("ign") or {})      # بصمة مهملة -> مسارها الحالي
+    ign_noted = list(ws.get("ign_noted") or [])  # بصمات نُبّه عنها هذه الجلسة
+    seed_ign_names = []
     first = not ws.get("seeded")
 
     # مسح شامل متكرر (يشمل المجلدات الفرعية) وبصمة (حجم، وقت تعديل) لكل ملف،
@@ -1140,8 +1167,17 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
     for p in scan:
         if p not in pending and present.get(p) != scan[p]:
             pending[p] = {"sig": scan[p], "silent": bool(first), "fails": 0}
+    # صورة مهملة غادرت المجلد: يُلغى تجاهلها — رجوعها القادم قرار جديد
+    for fp_ig, p_ig in list(ign_present.items()):
+        if p_ig not in scan:
+            db_unignore(fp_ig)
+            ign_present.pop(fp_ig, None)
+            if fp_ig in ign_noted:
+                ign_noted.remove(fp_ig)
     ws["present"] = scan
     ws["pending"] = pending
+    ws["ign"] = ign_present
+    ws["ign_noted"] = ign_noted
     ws["seeded"] = True
 
     if not ready:
@@ -1177,9 +1213,30 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
             try:
                 fp = _fingerprint(local)
             except Exception:
+                # تعذّرت قراءتها الآن (ملف مشغول/نسخة تُكتب): تُعاد المحاولة
+                # كأي ملف ناقص، مع تحذير عند التعثّر الطويل — لا إسقاط صامت
+                nf = fails + 1
+                if nf == 8:
+                    warn_names.append(os.path.basename(path))
+                if nf < 240:
+                    pending[path] = {"sig": scan.get(path), "silent": silent,
+                                     "fails": nf}
                 continue
             if fp in ignored_fps:
-                continue  # حذفها المستخدم من القائمة: لا ترجع أبداً
+                # حذفها المستخدم من القائمة: لا تُسجَّل ما دامت في المجلد —
+                # لكن بلا صمت وبلا أبدية: تُنبَّه مرة، وتُحيا إن غابت ورجعت
+                ign_present[fp] = path
+                ws["ign"] = ign_present
+                if fp not in ign_noted:
+                    ign_noted.append(fp)
+                    ws["ign_noted"] = ign_noted
+                    if silent:
+                        seed_ign_names.append(os.path.basename(path))
+                    else:
+                        lines.append(
+                            f"🗑 ({os.path.basename(path)}) محذوفة من القائمة من قبل — لن تظهر ما دامت في المجلد. "
+                            "إن أردتها: اضغط «↩ إظهار الصور المحذوفة» تحت القائمة ثم حدّث الصفحة.")
+                continue
             if silent and fp in known_fps:
                 continue  # معروفة من قبل: لا نلمس سجلّها (وقتها وحالتها محفوظان)
             row, created = db_register(fp, os.path.basename(path), path, local)
@@ -1235,14 +1292,18 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
     if warn_names:
         lines.append("⚠ صور وصلت لكنها لا تُقرأ حتى الآن (نسخها لم يكتمل أو "
                      "ملفها تالف) وتبقى منتظرة: " + "، ".join(warn_names[:4]))
+    if seed_ign_names:
+        lines.append("🗑 في المجلد " + str(len(seed_ign_names)) +
+                     " صورة محذوفة من القائمة من قبل (لن تظهر): " +
+                     "، ".join(seed_ign_names[:4]) +
+                     " — اضغط «↩ إظهار الصور المحذوفة» تحت القائمة إن أردتها.")
     pd["photos"] = db_list()
     dyn = render_dynamic(pd)
     if base is None:
-        if warn_names:
+        if lines:
             return (ws,) + (_s,) * 9 + ("\n".join(lines),) + (_s,) + dyn
         return (ws,) + (_s,) * 11 + dyn
-    if loud > 1 or warn_names:
-        base = base[:8] + ("\n".join(lines),) + base[9:]
+    base = base[:8] + ("\n".join(lines),) + base[9:]
     return base + dyn
 
 
@@ -1571,6 +1632,7 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                     photo_rows.append((_rg, _rmd, _rb8, _rb12, _rbdel))
                 _rows_ctx.__exit__(None, None, None)
                 gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة. زر «🗑 حذف» يزيل السجل من القائمة فقط — ملف الصورة في مجلد الكاميرا لا يُمسّ.")
+                unignore_btn = gr.Button("↩ إظهار الصور المحذوفة من القائمة", size="sm", variant="secondary")
 
             out_std = gr.Image(label="الصورة القياسية", type="numpy", interactive=False, height=330)
             out_hd = gr.Image(label="نسخة عالية الدقة", type="numpy", interactive=False, height=250)
@@ -1810,6 +1872,15 @@ with gr.Blocks(title="صانع صور الهوية — الجزائر") as demo:
                       outputs=QUICK_OUTPUTS)
         _row[4].click(_mk_delete(_j), inputs=[photos_state],
                       outputs=DYN_OUTPUTS + [out_status])
+
+    def _unignore_all():
+        n = db_clear_ignored()
+        if n:
+            return (f"↩ أُلغي حذف {n} صورة. حدّث الصفحة الآن (F5) — "
+                    "ستظهر الصور المحذوفة الموجودة في مجلد الكاميرا.")
+        return "لا توجد صور محذوفة مخفية حالياً."
+
+    unignore_btn.click(_unignore_all, outputs=[out_status], queue=False)
 
 
     # ---------- حفظ/استرجاع الإعدادات ----------
