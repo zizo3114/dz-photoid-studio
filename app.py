@@ -695,6 +695,8 @@ def make_id_photo(img, state, mode, size_label, custom_w_mm, custom_h_mm,
                 raise gr.Error("لم يظهر أي وجه في الصورة. جرّب صورة أوضح، يكون فيها الوجه من الأمام ومضاءً جيداً — أو بدّل إلى الوضع اليدوي واضبط القص بنفسك.")
             raise gr.Error(f"الصورة تحتوي {n} وجوه — صورة الهوية يجب أن تحتوي وجهاً واحداً فقط. اختر صورة فيها شخص واحد.")
         except Exception as e:
+            if isinstance(state, dict) and state.get("init_faces", 1) == 0:
+                raise gr.Error("لم يظهر أي وجه في الصورة. جرّب صورة أوضح، يكون فيها الوجه من الأمام ومضاءً جيداً — أو بدّل إلى الوضع اليدوي واضبط القص بنفسك.")
             raise gr.Error(f"حدث خطأ أثناء المعالجة: {e}")
         try:
             import math as _math
@@ -1553,7 +1555,8 @@ footer { display: none !important; }
 
 /* ===== الأعمدة ===== */
 @media (min-width: 1100px) {
-  #col_controls { flex: 0 0 350px !important; max-width: 350px; position: sticky; top: 10px; align-self: flex-start; max-height: calc(100vh - 20px); overflow-y: auto; padding-inline-end: 4px; }
+  #col_controls { flex: 0 0 350px !important; max-width: 350px; flex-wrap: nowrap !important; position: sticky; top: 10px; align-self: flex-start; max-height: calc(100vh - 20px); overflow-y: auto; padding-inline-end: 4px; }
+#col_controls > * { flex-shrink: 0 !important; }
   #col_canvas { flex: 1 1 auto !important; min-width: 400px; }
   #col_results { flex: 0 0 min(var(--wres, 40%), 560px) !important; max-width: 560px; min-width: 320px; }
 }
