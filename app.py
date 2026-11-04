@@ -978,26 +978,34 @@ def render_dynamic(pd):
 
 def _file_complete(path):
     """
-    اكتمال ملف صورة بلا فكّ كامل: JPEG الكامل ينتهي بعلامة FFD9 وPNG
-    بمقطع IEND — ملف ما زال يُنسخ لا يحمل خاتمته بعد.
+    اكتمال ملف صورة: خاتمة صحيحة، أو فكّ ترميز كامل ناجح.
+    المسار السريع: JPEG ينتهي بعلامة FFD9 (تقبل حشوة بيضاء/صفريّة بعدها)
+    وPNG بمقطع IEND. وإن فشل، فكٌّ كامل بـ PIL: صور سليمة ببايتات زائدة
+    بعد الخاتمة (تصدير هواتف وبرامج تحرير) كانت ترفضها الخاتمة الصارمة
+    فتبقى معلّقة إلى الأبد ولا تظهر أبداً — والآن تُقبل ما دامت تُفكّ.
+    استقرار الحجم عبر نبضتين شرط مستقلّ في المراقب قبل أي معالجة.
     """
     try:
-        low = path.lower()
         with open(path, "rb") as f:
+            head = f.read(8)
             f.seek(0, os.SEEK_END)
             n = f.tell()
-            if low.endswith((".jpg", ".jpeg")):
-                if n < 4:
-                    return False
-                f.seek(n - 2)
-                return f.read(2) == b"\xff\xd9"
-            if low.endswith(".png"):
-                if n < 12:
-                    return False
-                f.seek(n - 12)
-                return f.read(12) == b"\x00\x00\x00\x00IEND\xaeB`\x82"
-            return True
+            f.seek(max(0, n - 65536))
+            tail = f.read()
     except OSError:
+        return False
+    if head[:3] == b"\xff\xd8\xff":  # JPEG (ويشمل JFIF)
+        idx = tail.rfind(b"\xff\xd9")
+        if idx >= 0 and not tail[idx + 2:].strip(b"\x00\r\n\t "):
+            return True
+    elif head[:8] == b"\x89PNG\r\n\x1a\n":
+        if b"IEND" in tail[-32:]:
+            return True
+    try:
+        with Image.open(path) as im:
+            im.load()
+        return True
+    except Exception:
         return False
 
 
@@ -1012,8 +1020,15 @@ def _inbox_copy(path):
         dst_dir = os.path.join(BASE_DIR, "outputs", "inbox")
         os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, os.path.basename(path))
-        if os.path.isfile(dst) and os.path.getsize(dst) == os.path.getsize(path):
-            return dst
+        if os.path.isfile(dst):
+            if os.path.getsize(dst) == os.path.getsize(path):
+                return dst
+            # اسم مكرر بمحتوى مختلف (مجلدات فرعية/استبدال): اسم فريد للنسخة
+            stem, ext = os.path.splitext(os.path.basename(path))
+            k = 2
+            while os.path.isfile(os.path.join(dst_dir, f"{stem}__{k}{ext}")):
+                k += 1
+            dst = os.path.join(dst_dir, f"{stem}__{k}{ext}")
         shutil.copy2(path, dst)
         return dst
     except Exception:
@@ -1084,33 +1099,47 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
     pending = dict(ws.get("pending") or {})
     first = not ws.get("seeded")
 
+    # مسح شامل متكرر (يشمل المجلدات الفرعية) وبصمة (حجم، وقت تعديل) لكل ملف،
+    # بامتدادات أوسع من ذي قبل: صورة .jfif/.webp/.bmp سليمة كانت تُتخطّى
+    # بصمت، وصورة في مجلد فرعي لا تُرى، وصورة بُدّلت بأخرى بنفس الاسم
+    # (عدّاد الكاميرا يعود للصفر) لا تُكتشف — والثلاثة الآن تُرصد.
+    IMG_EXTS = (".jpg", ".jpeg", ".jfif", ".png", ".bmp", ".webp",
+                ".tif", ".tiff")
+    outputs_root = os.path.normpath(os.path.join(BASE_DIR, "outputs"))
     scan = {}
     try:
-        for fname in os.listdir(folder):
-            if fname.lower().endswith((".jpg", ".jpeg", ".png")):
-                fp_path = os.path.join(folder, fname)
-                try:
-                    scan[fp_path] = os.path.getsize(fp_path)
-                except OSError:
-                    pass
+        if os.path.normpath(folder) != outputs_root:
+            for root, dirs, files in os.walk(folder):
+                dirs[:] = [d for d in dirs if not d.startswith(".")
+                           and os.path.normpath(os.path.join(root, d))
+                           != outputs_root]
+                for fname in files:
+                    if fname.lower().endswith(IMG_EXTS):
+                        fpath = os.path.join(root, fname)
+                        try:
+                            stt = os.stat(fpath)
+                            scan[fpath] = [stt.st_size, int(stt.st_mtime)]
+                        except OSError:
+                            pass
     except OSError:
         return SKIP12 + (render_dynamic({**pd, "photos": db_list()})
                          if dyn_changed else SKIPDYN)
 
-    # الاستقرار أولاً: لا تُعالج إلا صورة كانت معلّقة من نبضة سابقة وثبت حجمها
+    # الاستقرار أولاً: لا تُعالج إلا صورة كانت معلّقة من نبضة سابقة وثبتت بصمتها
     ready = []
     for p, info in list(pending.items()):
         if p not in scan:
             pending.pop(p)
-        elif scan[p] == info["size"]:
-            ready.append((p, bool(info.get("silent"))))
+        elif scan[p] == info.get("sig"):
+            ready.append((p, bool(info.get("silent")),
+                          int(info.get("fails", 0))))
             pending.pop(p)
         else:
-            info["size"] = scan[p]
-    # ثم تسجيل الظهورات الجديدة كمعلّقة (تُعالج في النبضة التالية إن ثبتت)
+            info["sig"] = scan[p]
+    # الظهور الجديد أو تغيّر المحتوى بنفس المسار → تعليق حتى يثبت
     for p in scan:
-        if p not in present and p not in pending:
-            pending[p] = {"size": scan[p], "silent": bool(first)}
+        if p not in pending and present.get(p) != scan[p]:
+            pending[p] = {"sig": scan[p], "silent": bool(first), "fails": 0}
     ws["present"] = scan
     ws["pending"] = pending
     ws["seeded"] = True
@@ -1130,71 +1159,89 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
     base = None
     lines = []
     loud = 0
-    for path, silent in ready:
-        local = _inbox_copy(path)
-        if not _file_complete(local):
-            # ملف لم يكتمل نزوله بعد: يبقى معلّقاً حتى تظهر خاتمته
-            pending[path] = {"size": scan.get(path, -1), "silent": silent}
-            continue
+    warn_names = []
+    for path, silent, fails in ready:
         try:
-            fp = _fingerprint(local)
-        except Exception:
-            continue
-        if fp in ignored_fps:
-            continue  # حذفها المستخدم من القائمة: لا ترجع أبداً
-        if silent and fp in known_fps:
-            continue  # معروفة من قبل: لا نلمس سجلّها (وقتها وحالتها محفوظان)
-        row, created = db_register(fp, os.path.basename(path), path, local)
-        if silent:
-            continue
-        loud += 1
-        kind = ("new" if created else
-                "again_printed" if row["printed"] else "again_unprinted")
-        pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != fp]
-        pd["notifs"].append({"pid": fp, "kind": kind,
-                             "expires": now_ts + 30})
-        st, preview, ostatus, nzoom, npanx, npany = on_upload(
-            local, mode, *preview_vals)
-        name = os.path.basename(path)
-        if st is None:
-            lines.append(f"📥 وصلت ({name}) لكن تعذّر تجهيزها: {ostatus}")
-            base = (ws, local, None, None, _s, _s, _s, _s,
-                    "\n".join(lines), _s, _s, _s)
-            continue
-        if not auto_make:
-            lines.append(f"📥 وصلت صورة من الكاميرا: {name} — {ostatus}")
-            base = (ws, local, st, preview, _s, _s, _s, _s,
-                    "\n".join(lines), nzoom, npanx, npany)
-            continue
-        ez, epx, epy = zoom, pan_x, pan_y
-        if st.get("init"):
-            ez, epx, epy = st["init"]
-        try:
-            m = make_id_photo(local, st, mode, size_label, cw, ch,
-                              color_label, custom_color, sheet_label,
-                              align_face, kb, angle, ez, epx, epy,
-                              bright, contrast, satur, sharp,
-                              shadows, highlights, temp)
-            db_mark(fp, made=True)
-            lines.append(f"📥 ({name}) — صُنعت تلقائياً ✓\n{m[4]}")
-            base = (ws, local, st, preview, m[0], m[1], m[2], m[3],
-                    "\n".join(lines), nzoom, npanx, npany)
-        except gr.Error as e:
-            msg = getattr(e, "message", None) or str(e)
-            lines.append(f"📥 وصلت ({name}) لكن تعذّر صنعها: {msg}")
-            base = (ws, local, st, preview, _s, _s, _s, _s,
-                    "\n".join(lines), nzoom, npanx, npany)
+            local = _inbox_copy(path)
+            if not _file_complete(local):
+                # لم تكتمل/لا تُفكّ بعد: تبقى معلّقة وتُعاد المحاولة كل نبضة،
+                # مع تحذير مرئي واحد عند التعثّر الطويل، وترك نهائي بعد ~240
+                # محاولة كي لا تسمّم المراقب (تعود من تلقائها إن تغيّر محتواها).
+                nf = fails + 1
+                if nf == 8:
+                    warn_names.append(os.path.basename(path))
+                if nf < 240:
+                    pending[path] = {"sig": scan.get(path), "silent": silent,
+                                     "fails": nf}
+                continue
+            try:
+                fp = _fingerprint(local)
+            except Exception:
+                continue
+            if fp in ignored_fps:
+                continue  # حذفها المستخدم من القائمة: لا ترجع أبداً
+            if silent and fp in known_fps:
+                continue  # معروفة من قبل: لا نلمس سجلّها (وقتها وحالتها محفوظان)
+            row, created = db_register(fp, os.path.basename(path), path, local)
+            if silent:
+                continue
+            loud += 1
+            kind = ("new" if created else
+                    "again_printed" if row["printed"] else "again_unprinted")
+            pd["notifs"] = [n for n in pd["notifs"] if n["pid"] != fp]
+            pd["notifs"].append({"pid": fp, "kind": kind,
+                                 "expires": now_ts + 30})
+            st, preview, ostatus, nzoom, npanx, npany = on_upload(
+                local, mode, *preview_vals)
+            name = os.path.basename(path)
+            if st is None:
+                lines.append(f"📥 وصلت ({name}) لكن تعذّر تجهيزها: {ostatus}")
+                base = (ws, local, None, None, _s, _s, _s, _s,
+                        "\n".join(lines), _s, _s, _s)
+                continue
+            if not auto_make:
+                lines.append(f"📥 وصلت صورة من الكاميرا: {name} — {ostatus}")
+                base = (ws, local, st, preview, _s, _s, _s, _s,
+                        "\n".join(lines), nzoom, npanx, npany)
+                continue
+            ez, epx, epy = zoom, pan_x, pan_y
+            if st.get("init"):
+                ez, epx, epy = st["init"]
+            try:
+                m = make_id_photo(local, st, mode, size_label, cw, ch,
+                                  color_label, custom_color, sheet_label,
+                                  align_face, kb, angle, ez, epx, epy,
+                                  bright, contrast, satur, sharp,
+                                  shadows, highlights, temp)
+                db_mark(fp, made=True)
+                lines.append(f"📥 ({name}) — صُنعت تلقائياً ✓\n{m[4]}")
+                base = (ws, local, st, preview, m[0], m[1], m[2], m[3],
+                        "\n".join(lines), nzoom, npanx, npany)
+            except gr.Error as e:
+                msg = getattr(e, "message", None) or str(e)
+                lines.append(f"📥 وصلت ({name}) لكن تعذّر صنعها: {msg}")
+                base = (ws, local, st, preview, _s, _s, _s, _s,
+                        "\n".join(lines), nzoom, npanx, npany)
+            except Exception as e:
+                lines.append(f"📥 وصلت ({name}) وخطأ أثناء الصنع: {e}")
+                base = (ws, local, st, preview, _s, _s, _s, _s,
+                        "\n".join(lines), nzoom, npanx, npany)
         except Exception as e:
-            lines.append(f"📥 وصلت ({name}) وخطأ أثناء الصنع: {e}")
-            base = (ws, local, st, preview, _s, _s, _s, _s,
-                    "\n".join(lines), nzoom, npanx, npany)
+            # صورة واحدة مريضة لا توقف بقية الدفعة ولا المراقب
+            lines.append(f"⚠ تعذّرت معالجة صورة ({os.path.basename(path)}): {e}")
+            continue
     if loud > 1:
         lines.insert(0, f"📥 وصلت {loud} صور دفعة واحدة — سُجّلت وصُنعت كلها:")
+    if warn_names:
+        lines.append("⚠ صور وصلت لكنها لا تُقرأ حتى الآن (نسخها لم يكتمل أو "
+                     "ملفها تالف) وتبقى منتظرة: " + "، ".join(warn_names[:4]))
     pd["photos"] = db_list()
     dyn = render_dynamic(pd)
     if base is None:
+        if warn_names:
+            return (ws,) + (_s,) * 9 + ("\n".join(lines),) + (_s,) + dyn
         return (ws,) + (_s,) * 11 + dyn
-    if loud > 1:
+    if loud > 1 or warn_names:
         base = base[:8] + ("\n".join(lines),) + base[9:]
     return base + dyn
 
