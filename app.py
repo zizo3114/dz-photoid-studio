@@ -1304,7 +1304,11 @@ def watch_tick(wstate, photos, inbox_dir, watch_on, auto_make, cur_img, mode,
     dyn = render_dynamic(pd)
     if base is None:
         if lines:
-            return (ws,) + (_s,) * 9 + ("\n".join(lines),) + (_s,) + dyn
+            # محاذاة المخرجات الثابتة الـ12: الحالة هي المخرج رقم 9 (فهرس 8)
+            # بعد [حالة المراقبة، الصورة، الحالة الداخلية، المعاينة، النتائج
+            # الثلاث، الملفات] — أي إزاحة هنا تكتب النص في منزلق الإزاحة
+            # فتسمّمه وتموت كل النبضات التالية عند فحص المدخلات.
+            return (ws,) + (_s,) * 7 + ("\n".join(lines),) + (_s,) * 3 + dyn
         return (ws,) + (_s,) * 11 + dyn
     base = base[:8] + ("\n".join(lines),) + base[9:]
     return base + dyn
@@ -1519,6 +1523,22 @@ body, body.dark {
 .gradio-container fieldset.block > span:first-child {
   background: #F1F5F9 !important;
   color: #475569 !important;
+}
+/* v11.2: نصوص باهتة/غير مرئية صيدها تدقيق التباين الآلي:
+   أرقام نهايات المنزلقات + فاصل الرفع + زر مسح العنوان (رمادي فاتح على أبيض)،
+   وصفوف قائمة ملفات التنزيل التي ترث في الليل خلفية جدول داكنة رغم تثبيت
+   الهوية الفاتحة (نص داكن على داكن = غير مرئي تماما). */
+.gradio-container .min_value, .gradio-container .max_value {
+  color: #64748B !important;
+  font-weight: 600;
+}
+.gradio-container .or { color: #64748B !important; }
+.gradio-container .label-clear-button { color: #475569 !important; }
+.gradio-container tr.file, .gradio-container .file-preview tr {
+  background: #FFFFFF !important;
+}
+.gradio-container tr.file td, .gradio-container .file-preview td {
+  color: #1F2937 !important;
 }
 body.dark .gradio-container {
   --body-background-fill: #F4F5F7;

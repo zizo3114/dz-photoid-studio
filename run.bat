@@ -30,6 +30,11 @@ set VPY=.venv\Scripts\python.exe
 REM ---------- عند تغيّر المكتبات: إعادة بناء البيئة من الصفر (أنظف من الترقية فوق القديمة) ----------
 %VPY% -c "import hashlib,os,sys; h=hashlib.md5(open('requirements.txt','rb').read()+b'|v11.1').hexdigest(); old=open('.venv/.reqhash').read().strip() if os.path.exists('.venv/.reqhash') else ''; sys.exit(0 if h==old else 1)" >nul 2>&1
 if errorlevel 1 (
+  echo ------------------------------------------------------------
+  echo تنبيه: سيُعاد بناء بيئة البرنامج من الصفر في هذه المرة فقط.
+  echo أغلق أي نافذة أخرى للبرنامج مفتوحة الآن، ثم اضغط أي زر للمتابعة.
+  echo ------------------------------------------------------------
+  pause
   echo إعادة بناء بيئة البرنامج من الصفر - قد يأخذ بضع دقائق...
   rmdir /s /q .venv
   %PY% -m venv .venv
