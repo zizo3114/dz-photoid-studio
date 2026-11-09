@@ -5,3 +5,6 @@ outputs/
 settings.json
 *.onnx
 studio.db*
+logs/
+settings.json.bak
+*.part
