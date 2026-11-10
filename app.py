@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.1"
+APP_VERSION = "13.2"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -2265,6 +2265,14 @@ body, body.dark {
   width: 82%; text-align: center; pointer-events: none;
   color: #64748B; font-size: 16px; font-weight: 600; line-height: 1.9;
 }
+/* عند وجود صورة محمّلة: لا تلميح فوقها ولا شريط رفع يأكل العرض.
+   ملاحظة: لا نستعمل display:none هنا — أزرار Gradio الداخلية لا تستجيب
+   للأحداث على العناصر المخفية تماماً، وزر الاستيراد العلوي يقود هذا العنصر. */
+#col_canvas .image-container:has(img) .upload-container::after {
+  content: none !important;
+}
+/* الحاوية نفسها تبقى كما هي (طبقة شفافة فوق الصورة) لأن زر الاستيراد
+   العلوي يقود زرها الداخلي — تصغيرها كسر قيادة الاستيراد بعد التحميل. */
 """
 
 def _layout_style(page, split, listh):
@@ -2400,8 +2408,8 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
             with gr.Group(visible=S["ui_paper"]) as paper_group:
                 sheet_radio = gr.Radio(list(SHEETS.keys()), value=S["sheet"], label="ورقة الطباعة")
                 with gr.Row():
-                    print_photo_btn = gr.Button("🖨 طباعة الصورة", size="sm")
-                    print_sheet_btn = gr.Button("🖨 طباعة الورقة المقسمة", size="sm")
+                    print_photo_btn = gr.Button("🖨 طباعة الصورة", size="sm", visible=False)
+                    print_sheet_btn = gr.Button("🖨 طباعة الورقة", size="sm")
                 gr.Markdown(
                     "الورقة الناتجة JPG 600 DPI وبالمقاس الحقيقي. عند الطباعة اختر "
                     "«الحجم الفعلي/100%» ولا تختر «ملء الصفحة». المعاينة وزر تنزيلها "
@@ -2415,11 +2423,12 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
                 watch_chk = gr.Checkbox(label="مراقبة المجلد — تحميل أي صورة جديدة تلقائياً", value=S["watch"])
                 automake_chk = gr.Checkbox(label="صنع صورة الهوية تلقائياً فور وصول صورة جديدة", value=S["automake"])
                 printer_dd = gr.Dropdown(choices=list_printers(), value=(S["printer"] or None),
-                                         label="طابعة الطباعة المباشرة", allow_custom_value=True)
+                                         label="طابعة الطباعة المباشرة", allow_custom_value=True,
+                                         visible=False)
                 with gr.Row():
-                    refresh_printers_btn = gr.Button("🔄 تحديث الطابعات", size="sm")
-                    direct_sheet_btn = gr.Button("🖨 طباعة الورقة مباشرة", size="sm")
-                    direct_photo_btn = gr.Button("🖨 طباعة الصورة مباشرة", size="sm")
+                    refresh_printers_btn = gr.Button("🔄 تحديث الطابعات", size="sm", visible=False)
+                    direct_sheet_btn = gr.Button("🖨 طباعة الورقة مباشرة", size="sm", visible=False)
+                    direct_photo_btn = gr.Button("🖨 طباعة الصورة مباشرة", size="sm", visible=False)
                 gr.Markdown(
                     "**ربط الكاميرا:**\n"
                     "1. صوّر بصيغة JPEG (صور RAW بصيغة CR3 لا تُقرأ).\n"
@@ -2508,17 +2517,13 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
         studio_sheet = gr.Image(label="ورقة الطباعة", type="filepath", format="jpeg",
                                 buttons=["download", "fullscreen"], interactive=False,
                                 height=380, show_label=False)
-        with gr.Row():
-            studio_print_sheet_btn = gr.Button("🖨 طباعة الورقة (نافذة الطباعة)",
-                                               variant="primary")
-            studio_print_photo_btn = gr.Button("🖨 طباعة الصورة (نافذة الطباعة)")
-        with gr.Row():
-            studio_direct_sheet_btn = gr.Button("⚡ طباعة الورقة مباشرة على الطابعة")
-            studio_direct_photo_btn = gr.Button("⚡ طباعة الصورة مباشرة على الطابعة")
+        studio_print_btn = gr.Button("🖨 طباعة", variant="primary",
+                                     elem_id="btn-studio-print")
         gr.Markdown(
-            "من هنا تطبع الورقة أو الصورة، وزر التنزيل داخل معاينة الورقة يحفظ "
-            "ملفها الأصلي. الصورة القياسية وعالية الدقة وملفات التصدير كلها في "
-            "قسم «النتائج» يسار الشاشة.")
+            "زر واحد للطباعة: يطبع الورقة المقسمة الجاهزة كما صُنعت (8 أو 12 "
+            "صورة) — ومن نافذة الطباعة تختار طابعتك أو تحفظ PDF. زر التنزيل "
+            "داخل معاينة الورقة يحفظ ملفها الأصلي، والصورة القياسية وعالية "
+            "الدقة في قسم «النتائج» يسار الشاشة.")
 
     # ---------- حفظ الإعدادات (بمنع التكرار داخل save_settings_dict) ----------
     SETTINGS_KEYS = ["mode", "size", "custom_w", "custom_h", "color", "custom_color",
@@ -2740,7 +2745,7 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
     )
     import_btn.click(
         None,
-        js="() => { const fire = (el) => { if (!el) return; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) el.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); }; const dz = document.querySelector('#col_canvas .upload-container > button'); if (dz) { fire(dz); return; } fire(document.querySelector('#col_canvas button[aria-label=\"Upload file\"]')); }")
+        js="() => { const fire = (el) => { if (!el) return; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) el.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); }; const c = document.querySelector('#col_canvas'); const dz = c.querySelector('.upload-container > button'); if (c.querySelector('.image-container img')) { const rm = c.querySelector('button[aria-label=\"Remove Image\"]'); if (rm && dz) { fire(rm); setTimeout(() => fire(dz), 700); return; } } if (dz) { fire(dz); return; } fire(c.querySelector('button[aria-label=\"Upload file\"]')); }")
     camera_btn.click(
         None,
         js="() => { const fire = (el) => { if (!el) return; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) el.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); }; fire(document.querySelector('#col_canvas button[aria-label=\"Capture from camera\"]')); const c = document.querySelector('#col_canvas'); if (c) c.scrollIntoView({behavior: 'smooth', block: 'center'}); }")
@@ -2755,20 +2760,9 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
            "block: 'start'}); }, 350); return args; }")
     studio_close_btn.click(lambda: gr.update(visible=False), inputs=None,
                            outputs=[print_studio])
-    studio_print_sheet_btn.click(None, inputs=[out_files, sheet_radio,
-                                               size_radio, custom_w, custom_h],
-                                 js=PRINT_SHEET_JS)
-    studio_print_photo_btn.click(None, inputs=[out_files, sheet_radio,
-                                               size_radio, custom_w, custom_h],
-                                 js=PRINT_PHOTO_JS)
-    studio_direct_sheet_btn.click(_dprint_sheet,
-                                  inputs=[out_files, printer_dd, sheet_radio,
-                                          photos_state, in_image],
-                                  outputs=[out_status] + DYN_OUTPUTS)
-    studio_direct_photo_btn.click(_dprint_photo,
-                                  inputs=[out_files, printer_dd, photos_state,
-                                          in_image],
-                                  outputs=[out_status] + DYN_OUTPUTS)
+    studio_print_btn.click(None, inputs=[out_files, sheet_radio,
+                                         size_radio, custom_w, custom_h],
+                           js=PRINT_SHEET_JS)
 
     watch_timer = gr.Timer(1.5)
     watch_timer.tick(
