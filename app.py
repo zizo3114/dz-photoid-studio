@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.0"
+APP_VERSION = "13.1"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -2205,6 +2205,26 @@ body, body.dark {
 #print_studio {
   border: 2px solid #2563EB !important; border-radius: 14px;
   background: #FFFFFF; padding: 10px 14px; margin-top: 10px;
+}
+/* ===== v13.1: القوائم المنسدلة فاتحة دائماً =====
+   قائمة الخيارات المنبثقة كانت ترث خلفية Gradio الليلية (#0A0F1E) بينما نصّها
+   من الثيم الفاتح — نص داكن على أسود فلا تُقرأ أسماء الطابعات ليلاً. */
+.gradio-container {
+  --input-background-fill: #FFFFFF !important;
+  --input-background-fill-hover: #FFFFFF !important;
+  --input-background-fill-focus: #FFFFFF !important;
+  --block-background-fill: #FFFFFF !important;
+}
+.gradio-container .options {
+  background: #FFFFFF !important; color: #202938 !important;
+  border: 1px solid #E4E8EF !important;
+}
+.gradio-container .options .item {
+  color: #202938 !important; background: transparent !important;
+}
+.gradio-container .options .item:hover { background: #EFF6FF !important; }
+.gradio-container .options .item.selected {
+  background: #DBEAFE !important; color: #1D4ED8 !important; font-weight: 700;
 }
 /* ===== v13: تحويم أخضر لكل الأزرار + علامة صحّ واضحة + مساحة عمل للعرض فقط ===== */
 .gradio-container button {
