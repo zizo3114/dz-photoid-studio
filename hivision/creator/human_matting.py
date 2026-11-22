@@ -213,7 +213,13 @@ def get_modnet_matting(input_image, checkpoint_path, ref_size=512):
     matte = HIVISION_MODNET_SESS.run([output_name], {input_name: im})
     matte = (matte[0] * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_AREA)
+    # The matte is rendered at 512px and almost always ENLARGED to the
+    # processing size here; INTER_AREA enlargement degrades to
+    # nearest-neighbour and makes hair/silhouette edges blocky, so pick
+    # the interpolation by direction.
+    mask = cv2.resize(matte, (width, length),
+                      interpolation=(cv2.INTER_AREA if width <= matte.shape[1]
+                                     else cv2.INTER_CUBIC))
     b, g, r = cv2.split(np.uint8(input_image))
 
     output_image = cv2.merge((b, g, r, mask))
@@ -250,7 +256,13 @@ def get_modnet_matting_photographic_portrait_matting(
     )
     matte = (matte[0] * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_AREA)
+    # The matte is rendered at 512px and almost always ENLARGED to the
+    # processing size here; INTER_AREA enlargement degrades to
+    # nearest-neighbour and makes hair/silhouette edges blocky, so pick
+    # the interpolation by direction.
+    mask = cv2.resize(matte, (width, length),
+                      interpolation=(cv2.INTER_AREA if width <= matte.shape[1]
+                                     else cv2.INTER_CUBIC))
     b, g, r = cv2.split(np.uint8(input_image))
 
     output_image = cv2.merge((b, g, r, mask))
@@ -343,7 +355,13 @@ def get_mnn_modnet_matting(input_image, checkpoint_path, ref_size=512):
     matte = matte.read()  # var转换为np
     matte = (matte * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_AREA)
+    # The matte is rendered at 512px and almost always ENLARGED to the
+    # processing size here; INTER_AREA enlargement degrades to
+    # nearest-neighbour and makes hair/silhouette edges blocky, so pick
+    # the interpolation by direction.
+    mask = cv2.resize(matte, (width, length),
+                      interpolation=(cv2.INTER_AREA if width <= matte.shape[1]
+                                     else cv2.INTER_CUBIC))
     b, g, r = cv2.split(np.uint8(input_image))
 
     output_image = cv2.merge((b, g, r, mask))

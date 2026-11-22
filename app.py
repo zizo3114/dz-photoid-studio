@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.2"
+APP_VERSION = "13.3"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -487,7 +487,7 @@ def build_virtual_bgra(orig_bgr: np.ndarray, capped_matting: np.ndarray):
     orig_v = (cv2.resize(orig_bgr, (vw, vh), interpolation=cv2.INTER_AREA)
               if f < 1.0 else orig_bgr)
     alpha_v = cv2.resize(capped_matting[:, :, 3], (vw, vh),
-                         interpolation=cv2.INTER_LINEAR)
+                         interpolation=cv2.INTER_CUBIC)
     return cv2.merge((orig_v[:, :, 0], orig_v[:, :, 1], orig_v[:, :, 2], alpha_v))
 
 
@@ -510,6 +510,7 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignmen
                 # لا نعرف مقدار التدوير الذي طبّقه المحرك داخلياً — لا نخاطر
                 # بتركيب هندسة غير مؤكدة (كان ينتج وجهاً مقصوصاً)؛ نتراجع
                 # إلى نتيجة المحرك القياسية السليمة.
+                logger.warning("HQ path skipped: first-detect roll angle unknown")
                 return None
             if abs(first_roll) > 2:
                 # المحرك دوّر صوره داخلياً بالزاوية الأصلية: ندوّر الأصلية
@@ -532,6 +533,10 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignmen
         hd_a, _std_a, _clothing, _typo = adjust_photo(ctx2)
         return hd_a
     except Exception:
+        # لا تبتلع الفشل بصمت: مسار الجودة العالية هو الفرق بين قصّ حاد من
+        # الأصلية وقصّ مكبّر من نسخة المحرك المصغّرة (2000px) — سجّل السبب
+        # كي يمكن تشخيص أي تراجع جودة من logs/studio.log بدل تخمينه.
+        logger.exception("HQ re-render failed; falling back to engine output")
         return None
 
 
@@ -971,9 +976,12 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
                 print_img = finalize_from_crop(crop_hq, print_w, print_h, rgb)
         else:
             hd_img = composite_bg(result.hd, rgb)
-            std_img = (hd_img.resize((width, height), Image.LANCZOS)
-                       if hd_img.size != (width, height)
-                       else composite_bg(result.standard, rgb))
+            # الصورة القياسية تُبنى من قصّ المحرك القياسي الأصلي مباشرة، لا
+            # بتصغير نسخة HD — فنسخة HD قد تكون مكبّرة من قصّ أصغر من مقاسها،
+            # واشتقاق القياسية منها يراكم تشوّهَي تكبير ثم تصغير على التفاصيل.
+            std_img = composite_bg(result.standard, rgb)
+            if std_img.size != (width, height):
+                std_img = std_img.resize((width, height), Image.LANCZOS)
             if sheet_cfg is not None:
                 # Even with a small source, use the HD result rather than
                 # re-enlarging the lower-detail standard 300-DPI image.

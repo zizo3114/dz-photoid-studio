@@ -47,7 +47,14 @@ def adjust_photo(ctx: Context):
 
     # Step3, 裁剪框的调整
     cut_image = IDphotos_cut(x1, y1, x2, y2, ctx.matting_image)
-    cut_image = cv2.resize(cut_image, (crop_size[1], crop_size[0]))
+    if cut_image.shape[0] != crop_size[0] or cut_image.shape[1] != crop_size[1]:
+        # IDphotos_cut already returns exactly crop_size; only resize when
+        # that ever changes, and pick the interpolation by direction
+        # (INTER_AREA must never be used to enlarge — it pixelates).
+        _interp = (cv2.INTER_AREA if cut_image.shape[0] >= crop_size[0]
+                   else cv2.INTER_CUBIC)
+        cut_image = cv2.resize(cut_image, (crop_size[1], crop_size[0]),
+                               interpolation=_interp)
     y_top, y_bottom, x_left, x_right = U.get_box(
         cut_image.astype(np.uint8), model=2, correction_factor=0
     )  # 得到 cut_image 中人像的上下左右距离信息
@@ -226,8 +233,13 @@ def standard_photo_resize(input_image: np.array, size):
                     interpolation=cv2.INTER_AREA,
                 )
     else:
+        # Normally a reduction (INTER_AREA is right), but a very small
+        # source crop can make this an enlargement — never enlarge with
+        # INTER_AREA (it degrades to nearest-neighbour and pixelates).
+        _interp = (cv2.INTER_AREA if input_image.shape[0] >= size[0]
+                   else cv2.INTER_CUBIC)
         result_image = cv2.resize(
-            input_image, (size[1], size[0]), interpolation=cv2.INTER_AREA
+            input_image, (size[1], size[0]), interpolation=_interp
         )
 
     return result_image
@@ -252,7 +264,13 @@ def resize_image_by_min(input_image, esp=600):
 
         return (
             cv2.resize(
-                input_image, (new_width, new_height), interpolation=cv2.INTER_AREA
+                # This branch only ENLARGES. INTER_AREA is a decimation
+                # filter: for enlargement OpenCV makes it behave like
+                # INTER_NEAREST, which produced visibly pixelated/blocky
+                # HD photos whenever the engine crop was smaller than the
+                # requested minimum edge. Cubic interpolation is the
+                # correct choice for enlargement.
+                input_image, (new_width, new_height), interpolation=cv2.INTER_CUBIC
             ),
             new_height / height,
         )
