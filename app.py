@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.3"
+APP_VERSION = "13.4"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -419,8 +419,10 @@ def normalize_input(img) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
 
-def composite_bg(bgra: np.ndarray, rgb) -> Image.Image:
-    """تركيب الصورة المقصوصة (BGRA) على لون خلفية موحّد."""
+def composite_bg(bgra: np.ndarray, rgb, refine: bool = True) -> Image.Image:
+    """تركيب الصورة المقصوصة (BGRA) على لون خلفية موحّد — مع تنقية الحواف."""
+    if refine:
+        bgra = refine_cutout_bgra(bgra)
     rgba = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGBA)
     fg = Image.fromarray(rgba, mode="RGBA")
     canvas = Image.new("RGBA", fg.size, tuple(rgb) + (255,))
@@ -473,6 +475,71 @@ def apply_color_adjustments(img: Image.Image, brightness=1.0, contrast=1.0,
     return out
 
 
+def _guided_filter(guide: np.ndarray, src: np.ndarray, radius: int, eps: float) -> np.ndarray:
+    """مرشح موجّه (Guided Filter): ينعّم src مع احترام حواف guide الحقيقية."""
+    ksize = (2 * radius + 1, 2 * radius + 1)
+    mean_I = cv2.blur(guide, ksize)
+    mean_p = cv2.blur(src, ksize)
+    mean_Ip = cv2.blur(guide * src, ksize)
+    mean_II = cv2.blur(guide * guide, ksize)
+    cov = mean_Ip - mean_I * mean_p
+    var = mean_II - mean_I * mean_I
+    a = cov / (var + eps)
+    b = mean_p - a * mean_I
+    return cv2.blur(a, ksize) * guide + cv2.blur(b, ksize)
+
+
+def refine_cutout_bgra(bgra: np.ndarray) -> np.ndarray:
+    """
+    تنقية حواف القصّ مهنياً (قناع الإزالة الخام من النموذج بدقة 512px، فحوافه
+    خشنة متدرّجة وتحمل لون الخلفية الأصلية مخلوطاً في بكسلات الحافة):
+    1) ألفا موجّهة بصورة القصّ نفسها بدقتها الكاملة — تنجذب الحواف إلى حدود
+       الشعر والجلد الحقيقية بدل درجات القناع الخشن، فيزول التعرّج.
+    2) تنظيف ضباب الألفا المنخفض (مستويات) حتى لا تبقى هالة رمادية.
+    3) إزالة تلوّث اللون: فكّ خلط بكسلات الحافة شبه الشفافة — لونها المرصود
+       خليط من لون الشخص ولون خلفية الاستوديو الأصلية؛ نقدّر لون الخلفية
+       المحلي من الجانب الشفاف ونستخرج لون الشخص النقي، فلا تظهر هالة
+       رمادية/برتقالية عند التركيب على الأبيض أو أي لون.
+    عند أي خطأ تعيد المدخل كما هو (لا تكسر الصنع أبداً).
+    """
+    try:
+        if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
+            return bgra
+        h, w = bgra.shape[:2]
+        alpha = bgra[:, :, 3].astype(np.float32) / 255.0
+        if alpha.min() > 0.999:      # لا شفافية أصلاً — لا شيء يُنقّى
+            return bgra
+        rgb = bgra[:, :, :3].astype(np.float32)
+        guide = cv2.cvtColor(bgra[:, :, :3], cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+        radius = int(min(10, max(3, round(max(h, w) / 600.0))))
+        a = _guided_filter(guide, alpha, radius, 0.006)
+        # حارس الشريط: الألفا المنقّاة لا تتجاوز أبداً الحدّ الأقصى المحلي
+        # للألفا الأصلية ولا تهبط تحت حدّها الأدنى المحلي — التنقية تُعيد
+        # تشكيل الحافة داخل شريط الانتقال الأصلي فقط، ولا تستطيع توسيع
+        # الصورة الظلية (هالة خارجية) ولا أكلها (حواف منقوصة)، وهو ما يحدث
+        # عند الحواف قليلة التباين كالأذن الفاتحة على جدار فاتح.
+        _kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                          (2 * radius + 1, 2 * radius + 1))
+        a_max = cv2.dilate(alpha, _kern)
+        a_min = cv2.erode(alpha, _kern)
+        a = np.minimum(np.maximum(a, a_min), a_max)
+        a = np.clip((a - 0.04) / 0.92, 0.0, 1.0)
+        # --- إزالة تلوّث اللون في شريط الحافة فقط ---
+        inv = (1.0 - a)[..., None]
+        big = (2 * (radius * 3) + 1, 2 * (radius * 3) + 1)
+        denom = cv2.blur(inv[:, :, 0], big)[..., None] + 1e-6
+        bg_est = cv2.blur(rgb * inv, big) / denom
+        fg = (rgb - inv * bg_est) / np.maximum(a[..., None], 0.35)
+        fg = np.clip(fg, 0, 255)
+        band = ((a > 0.10) & (a < 0.98))[..., None]
+        rgb = np.where(band, fg, rgb)
+        out = np.dstack((rgb, a * 255.0))
+        return np.clip(out, 0, 255).astype(np.uint8)
+    except Exception:
+        logger.exception("Cutout refinement failed; using raw matting")
+        return bgra
+
+
 def build_virtual_bgra(orig_bgr: np.ndarray, capped_matting: np.ndarray):
     """
     بناء نسخة افتراضية كاملة الدقة من صورة الإزالة: بكسلات الأصلية الحقيقية
@@ -488,7 +555,10 @@ def build_virtual_bgra(orig_bgr: np.ndarray, capped_matting: np.ndarray):
               if f < 1.0 else orig_bgr)
     alpha_v = cv2.resize(capped_matting[:, :, 3], (vw, vh),
                          interpolation=cv2.INTER_CUBIC)
-    return cv2.merge((orig_v[:, :, 0], orig_v[:, :, 1], orig_v[:, :, 2], alpha_v))
+    merged = cv2.merge((orig_v[:, :, 0], orig_v[:, :, 1], orig_v[:, :, 2], alpha_v))
+    # تنقية الحواف هنا — عند الدقة الكاملة — يستفيد منها المسار التلقائي
+    # عالي الجودة والوضع اليدوي معاً (كلاهما يبني على هذه النسخة الافتراضية).
+    return refine_cutout_bgra(merged)
 
 
 def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignment: bool):
@@ -565,6 +635,10 @@ def render_manual(matting_bgra: np.ndarray, angle, zoom, pan_x, pan_y,
         padded = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
         padded.paste(crop, (0, 0))
         crop = padded
+    # تنقية حواف القصّ عند مقاس الهدف قبل التركيب (سريعة عند هذا المقاس،
+    # وتشمل المعاينة والنتائج النهائية معاً).
+    _bgra = refine_cutout_bgra(cv2.cvtColor(np.array(crop), cv2.COLOR_RGBA2BGRA))
+    crop = Image.fromarray(cv2.cvtColor(_bgra, cv2.COLOR_BGRA2RGBA), mode="RGBA")
     canvas = Image.new("RGBA", (target_w, target_h), tuple(rgb) + (255,))
     return Image.alpha_composite(canvas, crop).convert("RGB")
 
@@ -786,7 +860,7 @@ def compute_auto_init(matting_bgra, width, height):
     """
     import math
     try:
-        rgb = np.array(composite_bg(matting_bgra, (255, 255, 255)))
+        rgb = np.array(composite_bg(matting_bgra, (255, 255, 255), refine=False))
         # The detector instance is cached for speed. Serialize access because
         # this callback can arrive concurrently from a browser and folder watch.
         with _MTCNN_LOCK:
