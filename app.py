@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.4"
+APP_VERSION = "13.5"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -512,6 +512,13 @@ def refine_cutout_bgra(bgra: np.ndarray) -> np.ndarray:
         rgb = bgra[:, :, :3].astype(np.float32)
         guide = cv2.cvtColor(bgra[:, :, :3], cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
         radius = int(min(10, max(3, round(max(h, w) / 600.0))))
+        # تنظيف حازم أولاً: نموذج الإزالة يترك «هالة» ألفا خفيفة حول الشخص
+        # (قيم 0.05–0.5 تتناقص بعيداً عنه) — على خلفية رمادية/داكنة تظهر
+        # كشبح رمادي في النتيجة بدل الأبيض النقي (قِيس: خلفية 242 بدل 255).
+        # إعادة التدرّج هذه تُصفّر كل ما دون 0.22 وتُشبع ما فوق 0.90،
+        # فتختفي الهالة ويبقى الشعر الحقيقي (ألفاه أعلى) — وتُحسب الحواف
+        # الموجّهة وحارس الشريط بعدها على الألفا النظيفة لا الخام.
+        alpha = np.clip((alpha - 0.22) / 0.68, 0.0, 1.0)
         a = _guided_filter(guide, alpha, radius, 0.006)
         # حارس الشريط: الألفا المنقّاة لا تتجاوز أبداً الحدّ الأقصى المحلي
         # للألفا الأصلية ولا تهبط تحت حدّها الأدنى المحلي — التنقية تُعيد
@@ -523,7 +530,17 @@ def refine_cutout_bgra(bgra: np.ndarray) -> np.ndarray:
         a_max = cv2.dilate(alpha, _kern)
         a_min = cv2.erode(alpha, _kern)
         a = np.minimum(np.maximum(a, a_min), a_max)
-        a = np.clip((a - 0.04) / 0.92, 0.0, 1.0)
+        # بوابة القرب من النواة الصلبة: بكسلات شبه شفافة بعيدة عن جسم الشخص
+        # الصلب ليست حافة حقيقية بل هالة خلفية (تظهر كإطار رمادي/أسود حول
+        # الرأس خاصة على الخلفيات الداكنة أو الصور الضبابية الحواف) —
+        # تُخمد تدريجياً مع المسافة حتى تزول، بينما حواف الشعر والجلد
+        # الحقيقية ملاصقة للنواة فلا تتأثر.
+        _core = (a > 0.9).astype(np.uint8)
+        if 0 < int(_core.sum()) < _core.size:
+            _dist = cv2.distanceTransform(1 - _core, cv2.DIST_L2, 3)
+            _T = max(2.0, 0.0035 * max(h, w))
+            a = a * np.clip((1.4 * _T - _dist) / (0.8 * _T), 0.0, 1.0)
+        a = np.clip((a - 0.02) / 0.96, 0.0, 1.0)
         # --- إزالة تلوّث اللون في شريط الحافة فقط ---
         inv = (1.0 - a)[..., None]
         big = (2 * (radius * 3) + 1, 2 * (radius * 3) + 1)
@@ -985,6 +1002,10 @@ def manual_preview(state, angle, zoom, pan_x, pan_y, size_label, custom_w, custo
         return None
 
 
+# آخر صنع ناجح (صور PIL النهائية قبل الحفظ) — أساس ميزة التجميل اللاحقة.
+_LAST_MAKE = {}
+
+
 def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
                   color_label, custom_color, sheet_label, align_face, target_kb,
                   angle, zoom, pan_x, pan_y,
@@ -1067,6 +1088,15 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
     if print_img is not None:
         print_img = mild_sharpen(apply_color_adjustments(print_img, **adj))
 
+    # تُحفظ النتائج النهائية (قبل الحفظ) لميزة التجميل اللاحقة: التطبيق يعيد
+    # الحفظ دائماً من هذه النسخ الأصلية، فلا يتراكم التجميل فوق نفسه.
+    _LAST_MAKE.update({
+        "std": std_img.copy(), "hd": hd_img.copy(),
+        "print": (print_img.copy() if print_img is not None else None),
+        "sheet_cfg": sheet_cfg, "target_kb": target_kb or 0,
+        "paths": None,
+    })
+
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_" + uuid.uuid4().hex[:6]
     files = []
     std_path = save_jpg(std_img, os.path.join(OUT_DIR, f"photo_{stamp}.jpg"), target_kb or 0)
@@ -1114,6 +1144,7 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
                    "يبقى مقاسها الحقيقي كما هو عند الطباعة.")
     if _notes:
         status += " | تنبيه: " + "؛ ".join(_notes) + "."
+    _LAST_MAKE["paths"] = (std_path, hd_path, sheet_path, list(files))
     # Pass exact JPEG paths to Gradio rather than numpy arrays. This prevents
     # Gradio's default WebP preview cache from replacing what the user sees or
     # downloads from the image card.
@@ -1132,6 +1163,115 @@ def make_id_photo(*args, **kwargs):
             "تعذّر إنشاء صورة الهوية بسبب خطأ داخلي. لم تُحذف صورتك الأصلية؛ "
             "راجع logs/studio.log لمعرفة التفاصيل."
         ) from exc
+
+
+# ===================== التجميل (تحسين البشرة بعد الصنع) =====================
+# تجميل اختياري يظهر في فقاعة بعد صنع الصورة: تنعيم بشرة بفصل التفاصيل
+# (قاعدة ناعمة بمرشح ثنائي الاتجاه + تخفيف التفاصيل داخل قناع الجلد فقط)
+# + إشراق لطيف على الجلد — العينان والشعر والشفاه والملابس خارج القناع
+# فتبقى حادة كما هي. خيار «رجال» = نسبة خفيفة، «نساء» = متوسطة، والمنزلق
+# يتحكم بالنسبة النهائية. التطبيق يعيد الحفظ دائماً من النسخ الأصلية
+# المحفوظة في _LAST_MAKE فلا يتراكم، وزر الإلغاء يعيد الملفات الأصلية.
+
+BEAUTY_PRESETS = ("بدون تجميل", "👨 رجال — تحسين خفيف", "👩 نساء — تحسين متوسط", "🎛 مخصص")
+BEAUTY_LEVELS = {BEAUTY_PRESETS[0]: 0, BEAUTY_PRESETS[1]: 25, BEAUTY_PRESETS[2]: 50}
+
+
+def _skin_mask(bgr_u8: np.ndarray) -> np.ndarray:
+    """قناع جلد ناعم الحواف (0..1) من تقاطع مدى YCrCb وHSV المعروفين للبشرة."""
+    ycrcb = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2YCrCb)
+    m1 = cv2.inRange(ycrcb, np.array((0, 130, 75), np.uint8),
+                     np.array((255, 176, 130), np.uint8))
+    hsv = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2HSV)
+    m2 = cv2.inRange(hsv, np.array((0, 22, 55), np.uint8),
+                     np.array((28, 185, 255), np.uint8))
+    mask = cv2.bitwise_and(m1, m2)
+    side = min(bgr_u8.shape[:2])
+    k = max(3, (side // 90) | 1)
+    ker = np.ones((k, k), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, ker)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, ker)
+    blur = max(5, (side // 40) | 1)
+    return cv2.GaussianBlur(mask, (blur, blur), 0).astype(np.float32) / 255.0
+
+
+def beautify_image(img: Image.Image, strength) -> Image.Image:
+    """تجميل بنسبة 0..100: تنعيم بشرة داخل قناع الجلد + إشراق لطيف."""
+    try:
+        s = max(0.0, min(100.0, float(strength))) / 100.0
+    except Exception:
+        s = 0.0
+    if s <= 0.0 or img is None:
+        return img.copy() if img is not None else img
+    bgr = cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR)
+    mask = _skin_mask(bgr)[..., None]
+    if float(mask.max()) < 0.05:      # لا جلد مكشوفاً تقريباً — لا تغيير
+        return img.copy()
+    base = cv2.bilateralFilter(bgr, 9, 42, 12)
+    if s > 0.45:                      # نسبة عالية: تمريرة ثانية أنعم
+        base = cv2.bilateralFilter(base, 9, 42, 12)
+    bgr_f = bgr.astype(np.float32)
+    base_f = base.astype(np.float32)
+    detail = bgr_f - base_f
+    smoothed = base_f + detail * (1.0 - 0.78 * s)
+    out = bgr_f * (1.0 - mask) + smoothed * mask
+    # إشراق/تبييض لطيف على الجلد فقط (يرفع القيم دون حرق الإبرازات)
+    lifted = np.clip(out * (1.0 + 0.07 * s) + 5.0 * s, 0, 255)
+    out = out * (1.0 - mask) + lifted * mask
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    res = Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
+    if s > 0.02:                      # حيوية لونية خفيفة جداً على الكل
+        res = ImageEnhance.Color(res).enhance(1.0 + 0.05 * s)
+    return res
+
+
+def _beauty_save(std_b, hd_b, print_b):
+    """حفظ نتائج التجميل بملفات جديدة وإعادة مساراتها."""
+    ctx = _LAST_MAKE
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_" + uuid.uuid4().hex[:6]
+    std_path = save_jpg(std_b, os.path.join(OUT_DIR, f"photo_{stamp}.jpg"),
+                        ctx.get("target_kb") or 0)
+    hd_path = save_jpg(hd_b, os.path.join(OUT_DIR, f"photo_{stamp}_hd.jpg"), 0,
+                       dpi=HD_DPI)
+    files = [std_path, hd_path]
+    sheet_path = None
+    if ctx.get("sheet_cfg") is not None and print_b is not None:
+        sheet = build_sheet(print_b, ctx["sheet_cfg"], dpi=SHEET_DPI)
+        sheet_path = save_jpg(sheet, os.path.join(OUT_DIR, f"sheet_{stamp}.jpg"), 0,
+                              dpi=SHEET_DPI)
+        files.append(sheet_path)
+    return std_path, hd_path, sheet_path, files
+
+
+def apply_beauty(strength):
+    """تطبيق التجميل على آخر صورة مصنوعة (من النسخ الأصلية دائماً)."""
+    ctx = _LAST_MAKE
+    if not ctx.get("std") or not ctx.get("paths"):
+        raise gr.Error("اصنع الصورة أولاً، ثم طبّق التجميل عليها.")
+    try:
+        s = float(strength)
+    except Exception:
+        s = 0.0
+    if s <= 0:
+        std_path, hd_path, sheet_path, files = ctx["paths"]
+        return std_path, hd_path, sheet_path, files, "النسبة 0% — الصورة الأصلية كما هي دون تجميل."
+    std_b = beautify_image(ctx["std"], s)
+    hd_b = beautify_image(ctx["hd"], s)
+    print_b = beautify_image(ctx["print"], s) if ctx.get("print") is not None else None
+    std_path, hd_path, sheet_path, files = _beauty_save(std_b, hd_b, print_b)
+    return (std_path, hd_path, sheet_path, files,
+            f"طُبّق التجميل بنسبة {int(s)}% على الصورة القياسية وعالية الدقة وورقة الطباعة "
+            "(ملفات جديدة — الأصلية محفوظة في مجلد outputs). لإزالته اضغط «إلغاء التجميل».")
+
+
+def cancel_beauty():
+    """إلغاء التجميل: إعادة عرض الملفات الأصلية كما صُنعت أول مرة."""
+    ctx = _LAST_MAKE
+    if not ctx.get("paths"):
+        raise gr.Error("لا توجد صورة مصنوعة بعد.")
+    std_path, hd_path, sheet_path, files = ctx["paths"]
+    return (std_path, hd_path, sheet_path, files,
+            "أُلغي التجميل — عادت الصورة الأصلية كما صُنعت.")
 
 
 # ----------------------------- الطباعة -----------------------------
@@ -2288,6 +2428,14 @@ body, body.dark {
   border: 2px solid #2563EB !important; border-radius: 14px;
   background: #FFFFFF; padding: 10px 14px; margin-top: 10px;
 }
+/* فقاعة التجميل — تظهر فقط بعد صنع صورة، بألوان مثبتة تقرأ ليلاً ونهاراً */
+#beauty_panel {
+  border: 2px solid #7C3AED !important; border-radius: 16px;
+  background: #F5F3FF !important; color: #202938 !important;
+  padding: 10px 14px; margin-top: 10px;
+  box-shadow: 0 8px 24px rgba(124, 58, 237, .18);
+}
+#beauty_panel label, #beauty_panel span, #beauty_panel p { color: #202938 !important; }
 /* ===== v13.1: القوائم المنسدلة فاتحة دائماً =====
    قائمة الخيارات المنبثقة كانت ترث خلفية Gradio الليلية (#0A0F1E) بينما نصّها
    من الثيم الفاتح — نص داكن على أسود فلا تُقرأ أسماء الطابعات ليلاً. */
@@ -2572,6 +2720,22 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
                 file_count="multiple"
             )
 
+            # ======== فقاعة التجميل (تظهر فقط بعد صنع صورة) ========
+            with gr.Group(visible=False, elem_id="beauty_panel") as beauty_panel:
+                gr.Markdown("### ✨ التجميل — الصورة جاهزة، والتجميل اختياري\n"
+                            "تحسين البشرة فقط (تنعيم + إشراق لطيف) — العينان والشعر "
+                            "والملامح تبقى كما هي. اختر النوع أو حرّك المنزلق، ثم اضغط «تطبيق التجميل».")
+                beauty_preset = gr.Radio(
+                    list(BEAUTY_PRESETS), value=BEAUTY_PRESETS[0],
+                    label="نوع التجميل")
+                beauty_slider = gr.Slider(
+                    0, 100, value=0, step=5, label="نسبة التجميل %",
+                    info="0 = بدون تجميل — رجال خفيف 25 — نساء متوسط 50 — والمنزلق يضبطها كما تريد")
+                with gr.Row():
+                    beauty_apply_btn = gr.Button("✨ تطبيق التجميل", variant="primary")
+                    beauty_cancel_btn = gr.Button("↩ إلغاء التجميل", variant="secondary")
+                beauty_status = gr.Textbox(label="حالة التجميل", interactive=False)
+
             list_head = gr.Button(_sec_label("🗂 السجل والمعرض", S["ui_list"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_list"]) as list_group:
                 photo_rows = []
@@ -2816,15 +2980,37 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
                            outputs=[out_status] + DYN_OUTPUTS)
 
     # ---------- شريط الإجراءات العلوي + استوديو الطباعة (v12) ----------
+    def _ui_make(*args):
+        """صنع الصورة + إظهار فقاعة التجميل مضبوطة من الصفر بعد كل صنع."""
+        std_p, hd_p, sheet_p, files, status = make_id_photo(*args)
+        return (std_p, hd_p, sheet_p, files, status,
+                gr.update(visible=True), BEAUTY_PRESETS[0], 0, "")
+
     tmake_btn.click(
-        make_id_photo,
+        _ui_make,
         inputs=[in_image, state, mode_radio, size_radio, custom_w, custom_h,
                 color_radio, custom_color, sheet_radio, align_chk, kb_num,
                 angle_slider, zoom_slider, pan_x, pan_y,
                 bright_s, contrast_s, satur_s, sharp_s,
                 shadows_s, highlights_s, temp_s],
-        outputs=[out_std, out_hd, out_sheet, out_files, out_status],
+        outputs=[out_std, out_hd, out_sheet, out_files, out_status,
+                 beauty_panel, beauty_preset, beauty_slider, beauty_status],
     )
+
+    # ---------- التجميل: اختيار النوع يضبط المنزلق، والتطبيق/الإلغاء ----------
+    def _beauty_preset_level(preset):
+        if preset in BEAUTY_LEVELS:
+            return BEAUTY_LEVELS[preset]
+        return gr.update()          # «مخصص»: اترك المنزلق كما هو
+
+    beauty_preset.change(_beauty_preset_level, inputs=[beauty_preset],
+                         outputs=[beauty_slider])
+    beauty_apply_btn.click(
+        apply_beauty, inputs=[beauty_slider],
+        outputs=[out_std, out_hd, out_sheet, out_files, beauty_status])
+    beauty_cancel_btn.click(
+        cancel_beauty, inputs=None,
+        outputs=[out_std, out_hd, out_sheet, out_files, beauty_status])
     import_btn.click(
         None,
         js="() => { const fire = (el) => { if (!el) return; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) el.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); }; const c = document.querySelector('#col_canvas'); const dz = c.querySelector('.upload-container > button'); if (c.querySelector('.image-container img')) { const rm = c.querySelector('button[aria-label=\"Remove Image\"]'); if (rm && dz) { fire(rm); setTimeout(() => fire(dz), 700); return; } } if (dz) { fire(dz); return; } fire(c.querySelector('button[aria-label=\"Upload file\"]')); }")
