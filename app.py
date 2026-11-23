@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.6"
+APP_VERSION = "13.7"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -434,22 +434,26 @@ def normalize_input(img) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
 
-def composite_bg(bgra: np.ndarray, rgb, refine: bool = True) -> Image.Image:
-    """تركيب الصورة المقصوصة (BGRA) على لون خلفية موحّد — مع تنقية الحواف."""
+def composite_bg(bgra: np.ndarray, rgb, refine: bool = True, adj=None) -> Image.Image:
+    """تركيب الصورة المقصوصة (BGRA) على لون خلفية موحّد — مع تنقية الحواف.
+    تعديلات الألوان (adj) تُطبَّق على القصّ قبل التركيب: الخلفية لا تُمسّ."""
     if refine:
         bgra = refine_cutout_bgra(bgra)
+    bgra = adjust_bgra_rgb(bgra, adj)
     rgba = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGBA)
     fg = Image.fromarray(rgba, mode="RGBA")
     canvas = Image.new("RGBA", fg.size, tuple(rgb) + (255,))
     return Image.alpha_composite(canvas, fg).convert("RGB")
 
 
-def finalize_from_crop(crop_bgra: np.ndarray, target_w: int, target_h: int, rgb) -> Image.Image:
-    """تصغير قصّ BGRA عالي الدقة إلى المقاس الهدف بـ LANCZOS وتركيبه على الخلفية."""
+def finalize_from_crop(crop_bgra: np.ndarray, target_w: int, target_h: int, rgb, adj=None) -> Image.Image:
+    """تصغير قصّ BGRA عالي الدقة إلى المقاس الهدف بـ LANCZOS وتركيبه على الخلفية.
+    تعديلات الألوان (adj) تُطبَّق على القصّ قبل التركيب: الخلفية لا تُمسّ."""
     rgba = cv2.cvtColor(crop_bgra, cv2.COLOR_BGRA2RGBA)
     fg = Image.fromarray(rgba, mode="RGBA")
     if fg.size != (target_w, target_h):
         fg = fg.resize((target_w, target_h), Image.LANCZOS)
+    fg = adjust_rgba_pil(fg, adj)
     canvas = Image.new("RGBA", (target_w, target_h), tuple(rgb) + (255,))
     return Image.alpha_composite(canvas, fg).convert("RGB")
 
@@ -487,6 +491,41 @@ def apply_color_adjustments(img: Image.Image, brightness=1.0, contrast=1.0,
         out = ImageEnhance.Color(out).enhance(float(saturation))
     if sharpness != 1.0:
         out = ImageEnhance.Sharpness(out).enhance(float(sharpness))
+    return out
+
+
+def adjust_rgba_pil(fg_rgba: Image.Image, adj) -> Image.Image:
+    """تطبيق تعديلات الألوان على RGB لصورة RGBA (الألفا محفوظة) — قبل التركيب."""
+    if adj is None or _adj_is_neutral(adj) or fg_rgba is None:
+        return fg_rgba
+    r, g, b, a = fg_rgba.split()
+    rgb = apply_color_adjustments(Image.merge("RGB", (r, g, b)), **adj)
+    r2, g2, b2 = rgb.split()
+    return Image.merge("RGBA", (r2, g2, b2, a))
+
+
+def _adj_is_neutral(adj) -> bool:
+    if not adj:
+        return True
+    return (adj.get("brightness", 1.0) == 1.0 and adj.get("contrast", 1.0) == 1.0
+            and adj.get("saturation", 1.0) == 1.0 and adj.get("sharpness", 1.0) == 1.0
+            and not adj.get("shadows") and not adj.get("highlights")
+            and not adj.get("temperature"))
+
+
+def adjust_bgra_rgb(bgra: np.ndarray, adj) -> np.ndarray:
+    """
+    تطبيق تعديلات الألوان على قنوات لون القصّ فقط (الألفا لا تُمسّ) — قبل
+    تركيب الخلفية. مبدأ مهني ثابت: الخلفية المختارة لونٌ مُصنَّع يجب أن يخرج
+    كما اختير حرفياً (أبيض = 255)، وتعديلات كالإبرازات السالبة كانت تُطبَّق
+    بعد التركيب فتسحب الأبيض إلى رمادي ~243 في كل صورة مهما كان القصّ سليماً.
+    """
+    if adj is None or _adj_is_neutral(adj) or bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
+        return bgra
+    rgb_pil = Image.fromarray(bgra[:, :, :3][:, :, ::-1].copy())
+    rgb_pil = apply_color_adjustments(rgb_pil, **adj)
+    out = bgra.copy()
+    out[:, :, :3] = np.asarray(rgb_pil)[:, :, ::-1]
     return out
 
 
@@ -643,7 +682,7 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignmen
 
 
 def render_manual(matting_bgra: np.ndarray, angle, zoom, pan_x, pan_y,
-                  target_w: int, target_h: int, rgb) -> Image.Image:
+                  target_w: int, target_h: int, rgb, adj=None) -> Image.Image:
     """
     القص اليدوي: تدوير بالدرجة حول المركز، ثم تقريب (تغطية للإطار)،
     ثم إزاحة، ثم قص نافذة الإطار وتركيبها على لون الخلفية.
@@ -671,6 +710,8 @@ def render_manual(matting_bgra: np.ndarray, angle, zoom, pan_x, pan_y,
     # وتشمل المعاينة والنتائج النهائية معاً).
     _bgra = refine_cutout_bgra(cv2.cvtColor(np.array(crop), cv2.COLOR_RGBA2BGRA))
     crop = Image.fromarray(cv2.cvtColor(_bgra, cv2.COLOR_BGRA2RGBA), mode="RGBA")
+    # تعديلات الألوان على القصّ قبل التركيب — الخلفية المختارة لا تُمسّ.
+    crop = adjust_rgba_pil(crop, adj)
     canvas = Image.new("RGBA", (target_w, target_h), tuple(rgb) + (255,))
     return Image.alpha_composite(canvas, crop).convert("RGB")
 
@@ -1044,12 +1085,12 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         _hq = state.get("matting_hq")
         source = _hq if _hq is not None else state["matting"]
         hq_used = _hq is not None
-        std_img = render_manual(source, angle, zoom, pan_x, pan_y, width, height, rgb)
+        std_img = render_manual(source, angle, zoom, pan_x, pan_y, width, height, rgb, adj=adj)
         hd_w, hd_h = round(width * HD_FACTOR), round(height * HD_FACTOR)
-        hd_img = render_manual(source, angle, zoom, pan_x, pan_y, hd_w, hd_h, rgb)
+        hd_img = render_manual(source, angle, zoom, pan_x, pan_y, hd_w, hd_h, rgb, adj=adj)
         if sheet_cfg is not None:
             print_img = render_manual(source, angle, zoom, pan_x, pan_y,
-                                      print_w, print_h, rgb)
+                                      print_w, print_h, rgb, adj=adj)
     else:
         # ---------- الوضع التلقائي ----------
         if img is None:
@@ -1079,17 +1120,17 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
             crop_hq = hq_rerender(bgr, creator, (height, width), bool(align_face))
         if crop_hq is not None:
             hq_used = True
-            std_img = finalize_from_crop(crop_hq, width, height, rgb)
+            std_img = finalize_from_crop(crop_hq, width, height, rgb, adj=adj)
             hd_img = finalize_from_crop(crop_hq, round(width * HD_FACTOR),
-                                        round(height * HD_FACTOR), rgb)
+                                        round(height * HD_FACTOR), rgb, adj=adj)
             if sheet_cfg is not None:
-                print_img = finalize_from_crop(crop_hq, print_w, print_h, rgb)
+                print_img = finalize_from_crop(crop_hq, print_w, print_h, rgb, adj=adj)
         else:
-            hd_img = composite_bg(result.hd, rgb)
+            hd_img = composite_bg(result.hd, rgb, adj=adj)
             # الصورة القياسية تُبنى من قصّ المحرك القياسي الأصلي مباشرة، لا
             # بتصغير نسخة HD — فنسخة HD قد تكون مكبّرة من قصّ أصغر من مقاسها،
             # واشتقاق القياسية منها يراكم تشوّهَي تكبير ثم تصغير على التفاصيل.
-            std_img = composite_bg(result.standard, rgb)
+            std_img = composite_bg(result.standard, rgb, adj=adj)
             if std_img.size != (width, height):
                 std_img = std_img.resize((width, height), Image.LANCZOS)
             if sheet_cfg is not None:
@@ -1098,10 +1139,13 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
                 print_img = (hd_img.resize((print_w, print_h), Image.LANCZOS)
                              if hd_img.size != (print_w, print_h) else hd_img.copy())
 
-    std_img = mild_sharpen(apply_color_adjustments(std_img, **adj))
-    hd_img = mild_sharpen(apply_color_adjustments(hd_img, **adj))
+    # الحدة الخفيفة فقط بعد التركيب (قناع إزالة الضباب لا يغيّر المناطق
+    # المستوية كالخلفية). تعديلات الألوان طُبّقت قبل التركيب داخل
+    # finalize/composite/render — فالخلفية تخرج بلونها المختار حرفياً.
+    std_img = mild_sharpen(std_img)
+    hd_img = mild_sharpen(hd_img)
     if print_img is not None:
-        print_img = mild_sharpen(apply_color_adjustments(print_img, **adj))
+        print_img = mild_sharpen(print_img)
 
     # تُحفظ النتائج النهائية (قبل الحفظ) لميزة التجميل اللاحقة: التطبيق يعيد
     # الحفظ دائماً من هذه النسخ الأصلية، فلا يتراكم التجميل فوق نفسه.
