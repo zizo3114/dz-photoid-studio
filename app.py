@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.7"
+APP_VERSION = "14.0"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -1254,8 +1254,8 @@ def _skin_mask(bgr_u8: np.ndarray) -> np.ndarray:
     return cv2.GaussianBlur(mask, (blur, blur), 0).astype(np.float32) / 255.0
 
 
-def beautify_image(img: Image.Image, strength) -> Image.Image:
-    """تجميل بنسبة 0..100: تنعيم بشرة داخل قناع الجلد + إشراق لطيف."""
+def _beautify_classic(img: Image.Image, strength) -> Image.Image:
+    """التجميل الكلاسيكي (احتياطي): تنعيم بشرة داخل قناع الجلد + إشراق لطيف."""
     try:
         s = max(0.0, min(100.0, float(strength))) / 100.0
     except Exception:
@@ -1302,6 +1302,178 @@ def _beauty_save(std_b, hd_b, print_b):
     return std_path, hd_path, sheet_path, files
 
 
+# ---------------- تجميل بالذكاء الاصطناعي المحلي (GFPGAN) ----------------
+# موديل تحسين وجوه حقيقي يعمل محلياً عبر ONNX (بلا إنترنت بعد التنزيل الأول).
+# يُنزَّل مرة واحدة (~340MB) من scripts/download_weights.py عند أول تشغيل،
+# وإن غاب أو تعذّر تحميله يرجع التجميل تلقائياً للمحرك الكلاسيكي أعلاه.
+FACE_MODEL_PATH = os.path.join(BASE_DIR, "hivision", "creator", "weights",
+                               "gfpgan_1.4.onnx")
+_FACE_SESS = None
+_FACE_SESS_TRIED = False
+_FACE_LOCK = threading.RLock()
+_BEAUTY_ENGINE = {"last": "classic"}
+# قالب محاذاة الوجه القياسي FFHQ 512 (عيون، أنف، فم) — نفس قالب GFPGAN
+_FFHQ_512 = np.array([[192.98138, 239.94708], [318.90277, 240.19366],
+                      [256.63416, 314.01935], [201.26117, 371.41043],
+                      [313.08905, 371.15118]], dtype=np.float32)
+
+
+def _get_face_enhancer():
+    """جلسة موديل تحسين الوجوه (تحميل كسول) أو None إن غاب الموديل."""
+    global _FACE_SESS, _FACE_SESS_TRIED
+    if _FACE_SESS is not None or _FACE_SESS_TRIED:
+        return _FACE_SESS
+    with _FACE_LOCK:
+        if _FACE_SESS is None and not _FACE_SESS_TRIED:
+            _FACE_SESS_TRIED = True
+            try:
+                if os.path.exists(FACE_MODEL_PATH) and \
+                        os.path.getsize(FACE_MODEL_PATH) > 300_000_000:
+                    import onnxruntime as ort
+                    _FACE_SESS = ort.InferenceSession(
+                        FACE_MODEL_PATH, providers=["CPUExecutionProvider"])
+                    logger.info("Face-enhance model loaded")
+                else:
+                    logger.info("Face-enhance model not present — classic beauty")
+            except Exception:
+                logger.exception("Face-enhance model failed to load")
+                _FACE_SESS = None
+    return _FACE_SESS
+
+
+def _detect_face_lm(bgr):
+    """أكبر وجه في الصورة: (نقاط العلامات الخمس، مستطيل الوجه) أو (None, None).
+
+    صور الهوية قصّها ضيّق جداً (الوجه يملأ الإطار ويُقصّ عند الجبهة والذقن)
+    فيفشل الكاشف أحياناً أو يلتقط «وجهاً» وهمياً صغيراً — لذا نتحقق من
+    معقولية الحجم، وعند الفشل نعيد المحاولة على نسخة ممدودة بحواف بيضاء.
+    """
+    h_img, w_img = bgr.shape[:2]
+
+    def _try(image, dx=0, dy=0, thresholds=None):
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        with _MTCNN_LOCK:
+            if thresholds is None:
+                faces, landmarks = _get_mtcnn().detect(rgb)
+            else:
+                faces, landmarks = _get_mtcnn().detect(rgb, thresholds=thresholds)
+        if faces is None or len(faces) == 0 or landmarks is None:
+            return None, None
+        areas = [(float(f[2]) - float(f[0])) * (float(f[3]) - float(f[1]))
+                 for f in faces]
+        i = int(np.argmax(areas))
+        lm = np.asarray(landmarks, dtype=np.float32)
+        if lm.ndim == 2 and lm.shape[0] == 10:    # (10, N): خمس x ثم خمس y
+            pts = np.stack([lm[:5, i], lm[5:, i]], axis=1)
+        elif lm.ndim == 2 and lm.shape[1] == 10:  # (N, 10)
+            row = lm[i]
+            pts = np.stack([row[:5], row[5:]], axis=1)
+        else:
+            pts = lm.reshape(5, 2)
+        rect = np.array(faces[i], dtype=np.float32).copy()
+        pts = pts - np.array([dx, dy], dtype=np.float32)
+        rect[0] -= dx
+        rect[2] -= dx
+        rect[1] -= dy
+        rect[3] -= dy
+        fw, fh = rect[2] - rect[0], rect[3] - rect[1]
+        spread = float(np.max(np.linalg.norm(
+            pts[:, None, :] - pts[None, :, :], axis=2))) if len(pts) == 5 else 0.0
+        # معقولية: وجه هوية حقيقي عريض ومنتشر العلامات — الوهمي ضئيل متكتل
+        if fw >= 0.18 * w_img and fh >= 0.18 * h_img and spread >= 0.45 * fw:
+            return pts, rect
+        return None, None
+
+    relaxed = [0.5, 0.6, 0.6]  # عتبات أرخى تنقذ وجوهاً تفوتها الافتراضية
+    pts, rect = _try(bgr)
+    if pts is None:
+        pts, rect = _try(bgr, thresholds=relaxed)
+    if pts is not None:
+        return pts, rect
+    pad = int(0.55 * max(w_img, h_img))
+    padded = cv2.copyMakeBorder(bgr, pad, pad, pad, pad,
+                                cv2.BORDER_CONSTANT, value=(255, 255, 255))
+    pts, rect = _try(padded, dx=pad, dy=pad)
+    if pts is None:
+        pts, rect = _try(padded, dx=pad, dy=pad, thresholds=relaxed)
+    return pts, rect
+
+
+def beautify_image_ai(img: Image.Image, strength):
+    """تجميل ذكاء اصطناعي: محاذاة الوجه ← GFPGAN ← لصق بقناع ناعم ← تفتيح
+    مقاس على لمعان جلد الوجه (يعالج الوجوه الغامقة) يشمل الوجه والرقبة معاً
+    حتى لا يظهر خط فاصل. يعيد None عند تعذّر أي خطوة."""
+    sess = _get_face_enhancer()
+    if sess is None:
+        return None
+    try:
+        s = max(0.0, min(100.0, float(strength))) / 100.0
+        bgr = cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR)
+        lm, rect = _detect_face_lm(bgr)
+        if lm is None:
+            return None
+        M, _ = cv2.estimateAffinePartial2D(lm, _FFHQ_512, method=cv2.LMEDS)
+        if M is None:
+            return None
+        aligned = cv2.warpAffine(bgr, M, (512, 512), flags=cv2.INTER_LINEAR,
+                                 borderMode=cv2.BORDER_REPLICATE)
+        rgb = cv2.cvtColor(aligned, cv2.COLOR_BGR2RGB).astype(np.float32)
+        x = ((rgb / 255.0) * 2.0 - 1.0).transpose(2, 0, 1)[None]
+        y = sess.run(None, {sess.get_inputs()[0].name: x})[0]
+        out = ((y[0].transpose(1, 2, 0) + 1.0) / 2.0 * 255.0)
+        enh_bgr = cv2.cvtColor(np.clip(out, 0, 255).astype(np.uint8),
+                               cv2.COLOR_RGB2BGR)
+        blend = cv2.addWeighted(aligned, 1.0 - s, enh_bgr, s, 0)
+        mask = np.zeros((512, 512), np.float32)
+        cv2.ellipse(mask, (256, 262), (185, 230), 0, 0, 360, 1.0, -1)
+        mask = cv2.GaussianBlur(mask, (0, 0), 16)
+        # قطع ذيل التمويه: بقايا 1-2% منه كانت تسرّب لون الشعر الممدود
+        # بالمحاذاة إلى الخلفية البيضاء فتُسقطها من 255 إلى ~252
+        mask = np.where(mask < 0.02, 0.0, mask).astype(np.float32)
+        Minv = cv2.invertAffineTransform(M)
+        h_img, w_img = bgr.shape[:2]
+        back = cv2.warpAffine(blend, Minv, (w_img, h_img),
+                              flags=cv2.INTER_LINEAR,
+                              borderMode=cv2.BORDER_REPLICATE)
+        mback = cv2.warpAffine(mask, Minv, (w_img, h_img),
+                               flags=cv2.INTER_LINEAR)[..., None]
+        res = (back * mback + bgr * (1.0 - mback)).astype(np.float32)
+        # تفتيح الوجه: قياس وسيط لمعان الجلد داخل مستطيل الوجه ورفعه نحو 185
+        x1, y1, x2, y2 = [float(v) for v in rect[:4]]
+        fw, fh = max(8.0, x2 - x1), max(8.0, y2 - y1)
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        crop = bgr[int(max(0, y1)):int(y2), int(max(0, x1)):int(x2)]
+        if crop.size:
+            skin = _skin_mask(crop)
+            lum = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            vals = lum[skin > 0.5]
+            L = float(np.median(vals)) if vals.size > 50 else float(np.median(lum))
+            gain = 1.0 + max(0.0, (185.0 - L) / 185.0) * 0.95 * s
+            if gain > 1.01:
+                bmask = np.zeros((h_img, w_img), np.float32)
+                cv2.ellipse(bmask, (int(cx), int(cy + fh * 0.28)),
+                            (int(fw * 0.78), int(fh * 1.02)), 0, 0, 360, 1.0, -1)
+                bmask = cv2.GaussianBlur(
+                    bmask, (0, 0), max(6, w_img // 28))[..., None]
+                res = np.clip(res * (1.0 + (gain - 1.0) * bmask), 0, 255)
+        return Image.fromarray(
+            cv2.cvtColor(res.astype(np.uint8), cv2.COLOR_BGR2RGB))
+    except Exception:
+        logger.exception("AI beauty failed — falling back to classic")
+        return None
+
+
+def beautify_image(img: Image.Image, strength) -> Image.Image:
+    """التجميل: محرك الذكاء الاصطناعي إن توفّر موديله، وإلا الكلاسيكي."""
+    if strength and float(strength) > 0:
+        ai = beautify_image_ai(img, strength)
+        if ai is not None:
+            _BEAUTY_ENGINE["last"] = "ai"
+            return ai
+    _BEAUTY_ENGINE["last"] = "classic"
+    return _beautify_classic(img, strength)
+
+
 def apply_beauty(strength):
     """تطبيق التجميل على آخر صورة مصنوعة (من النسخ الأصلية دائماً)."""
     ctx = _LAST_MAKE
@@ -1314,12 +1486,19 @@ def apply_beauty(strength):
     if s <= 0:
         std_path, hd_path, sheet_path, files = ctx["paths"]
         return std_path, hd_path, sheet_path, files, "النسبة 0% — الصورة الأصلية كما هي دون تجميل."
-    std_b = beautify_image(ctx["std"], s)
-    hd_b = beautify_image(ctx["hd"], s)
-    print_b = beautify_image(ctx["print"], s) if ctx.get("print") is not None else None
+    # التجميل يُحسَب مرة واحدة على أكبر نسخة (الطباعة أو HD) وتُشتقّ الباقي
+    # منها بالتصغير — أسرع بثلاث مرات ونتيجة متطابقة بين النسخ كلها.
+    master_src = ctx["print"] if ctx.get("print") is not None else ctx["hd"]
+    master_b = beautify_image(master_src, s)
+    print_b = master_b if ctx.get("print") is not None else None
+    hd_b = master_b.resize(ctx["hd"].size, Image.LANCZOS) \
+        if master_b.size != ctx["hd"].size else master_b
+    std_b = master_b.resize(ctx["std"].size, Image.LANCZOS)
     std_path, hd_path, sheet_path, files = _beauty_save(std_b, hd_b, print_b)
+    engine = "بمحرك الذكاء الاصطناعي المحلي" \
+        if _BEAUTY_ENGINE["last"] == "ai" else "بالمحرك الكلاسيكي"
     return (std_path, hd_path, sheet_path, files,
-            f"طُبّق التجميل بنسبة {int(s)}% على الصورة القياسية وعالية الدقة وورقة الطباعة "
+            f"طُبّق التجميل بنسبة {int(s)}% {engine} على الصورة القياسية وعالية الدقة وورقة الطباعة "
             "(ملفات جديدة — الأصلية محفوظة في مجلد outputs). لإزالته اضغط «إلغاء التجميل».")
 
 
@@ -2782,8 +2961,9 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
             # ======== فقاعة التجميل (تظهر فقط بعد صنع صورة) ========
             with gr.Group(visible=False, elem_id="beauty_panel") as beauty_panel:
                 gr.Markdown("### ✨ التجميل — الصورة جاهزة، والتجميل اختياري\n"
-                            "تحسين البشرة فقط (تنعيم + إشراق لطيف) — العينان والشعر "
-                            "والملامح تبقى كما هي. اختر النوع أو حرّك المنزلق، ثم اضغط «تطبيق التجميل».")
+                            "تحسين حقيقي للوجه بمحرك ذكاء اصطناعي محلي: بشرة أنظف "
+                            "وإشراق طبيعي وتفتيح للوجوه الغامقة — بنسبة تتحكم فيها. "
+                            "اختر النوع أو حرّك المنزلق، ثم اضغط «تطبيق التجميل».")
                 beauty_preset = gr.Radio(
                     list(BEAUTY_PRESETS), value=BEAUTY_PRESETS[0],
                     label="نوع التجميل")

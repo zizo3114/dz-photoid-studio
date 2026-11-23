@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-تنزيل نموذج إزالة الخلفية (hivision_modnet.onnx) عند الحاجة.
-النموذج يأتي مع نسخة ZIP جاهزاً؛ هذه السكربت شبكة أمان لمن حمّل المشروع من GitHub
-(الملفات الكبيرة مستثناة من المستودع).
+تنزيل النماذج عند الحاجة:
+- نموذج إزالة الخلفية (hivision_modnet.onnx) — إلزامي لعمل البرنامج.
+- نموذج تجميل الوجوه بالذكاء الاصطناعي (gfpgan_1.4.onnx) — اختياري:
+  إن تعذّر تنزيله يعمل البرنامج عادياً ويرجع التجميل لمحركه الكلاسيكي.
+النماذج تأتي مع نسخة ZIP جاهزة ما أمكن؛ هذه السكربت شبكة أمان لمن حمّل
+المشروع من GitHub (الملفات الكبيرة مستثناة من المستودع).
 """
 import os
 import sys
@@ -20,21 +23,39 @@ def _configure_console_utf8():
 
 _configure_console_utf8()
 
-URL = ("https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/"
-       "download/pretrained-model/hivision_modnet.onnx")
-DEST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "hivision", "creator", "weights", "hivision_modnet.onnx")
-MIN_SIZE = 20_000_000  # النموذج الحقيقي ≈ 24.7MB
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEIGHTS = os.path.join(ROOT, "hivision", "creator", "weights")
+
+MODELS = [
+    {
+        "label": "نموذج إزالة الخلفية",
+        "size_label": "24.7MB",
+        "url": ("https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/"
+                "download/pretrained-model/hivision_modnet.onnx"),
+        "dest": os.path.join(WEIGHTS, "hivision_modnet.onnx"),
+        "min_size": 20_000_000,  # النموذج الحقيقي ≈ 24.7MB
+        "required": True,
+    },
+    {
+        "label": "نموذج تجميل الوجوه بالذكاء الاصطناعي (GFPGAN)",
+        "size_label": "340MB",
+        "url": ("https://github.com/facefusion/facefusion-assets/releases/"
+                "download/models-3.0.0/gfpgan_1.4.onnx"),
+        "dest": os.path.join(WEIGHTS, "gfpgan_1.4.onnx"),
+        "min_size": 330_000_000,  # النموذج الحقيقي ≈ 340MB
+        "required": False,
+    },
+]
 
 
-def _model_ok(path):
+def _model_ok(path, min_size):
     """النموذج صالح فقط إذا كان حجمه كافياً ويُفتح فعلياً بمحرك ONNX.
 
-    فحص الحجم وحده كان يقبل ملفاً مقطوعاً عند 20MB من أصل 24.7MB فيبقى
-    التثبيت مسموماً للأبد؛ التحميل الحقيقي هنا يكشف أي قطع أو تلف.
+    فحص الحجم وحده كان يقبل ملفاً مقطوعاً فيبقى التثبيت مسموماً للأبد؛
+    التحميل الحقيقي هنا يكشف أي قطع أو تلف.
     """
     try:
-        if not os.path.exists(path) or os.path.getsize(path) < MIN_SIZE:
+        if not os.path.exists(path) or os.path.getsize(path) < min_size:
             return False
     except OSError:
         return False
@@ -48,18 +69,20 @@ def _model_ok(path):
         return False
 
 
-def main():
-    if _model_ok(DEST):
-        print("النموذج موجود — لا حاجة للتنزيل.")
-        return 0
-    if os.path.exists(DEST):
-        print("النموذج الموجود ناقص أو تالف — إعادة تنزيله.")
-    os.makedirs(os.path.dirname(DEST), exist_ok=True)
-    print("جارٍ تنزيل نموذج إزالة الخلفية (24.7MB)…")
-    req = urllib.request.Request(URL, headers={"User-Agent": "Mozilla/5.0"})
-    tmp = DEST + ".part"
+def _download(model):
+    """تنزيل نموذج واحد مع التحقق الكامل. يعيد True عند النجاح."""
+    dest = model["dest"]
+    if _model_ok(dest, model["min_size"]):
+        print(f"{model['label']} موجود — لا حاجة للتنزيل.")
+        return True
+    if os.path.exists(dest):
+        print(f"{model['label']} الموجود ناقص أو تالف — إعادة تنزيله.")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    print(f"جارٍ تنزيل {model['label']} ({model['size_label']})…")
+    req = urllib.request.Request(model["url"], headers={"User-Agent": "Mozilla/5.0"})
+    tmp = dest + ".part"
     try:
-        with urllib.request.urlopen(req, timeout=90) as r, open(tmp, "wb") as f:
+        with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
             total = int(r.headers.get("Content-Length") or 0)
             done = 0
             while True:
@@ -74,21 +97,34 @@ def main():
         if total and done != total:
             raise RuntimeError(
                 f"انقطع التنزيل ({done} من {total} بايت) — تحقق من الاتصال وحاول مجدداً.")
-        if os.path.getsize(tmp) < MIN_SIZE:
+        if os.path.getsize(tmp) < model["min_size"]:
             raise RuntimeError("الملف النازل أصغر من المتوقع — تحقق من الاتصال وحاول مجدداً.")
-        if not _model_ok(tmp):
+        if not _model_ok(tmp, model["min_size"]):
             raise RuntimeError("الملف النازل لا يفتحه محرك ONNX (مقطوع أو تالف) — حاول مجدداً.")
-        os.replace(tmp, DEST)
-        print("تم تنزيل النموذج بنجاح.")
-        return 0
+        os.replace(tmp, dest)
+        print(f"تم تنزيل {model['label']} بنجاح.")
+        return True
     except Exception as e:
         if os.path.exists(tmp):
             os.remove(tmp)
-        print(f"فشل تنزيل النموذج: {e}")
+        print(f"فشل تنزيل {model['label']}: {e}")
         print("يمكنك تنزيله يدوياً من:")
-        print(URL)
-        print(f"وضعه في: {DEST}")
-        return 1
+        print(model["url"])
+        print(f"وضعه في: {dest}")
+        return False
+
+
+def main():
+    ok = True
+    for model in MODELS:
+        if _download(model):
+            continue
+        if model["required"]:
+            ok = False
+        else:
+            print("تنبيه: بدون هذا النموذج يعمل التجميل بالمحرك الكلاسيكي فقط — "
+                  "أعد تشغيل البرنامج وهو متصل بالإنترنت لإعادة المحاولة.")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
