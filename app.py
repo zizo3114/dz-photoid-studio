@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "14.0"
+APP_VERSION = "15.0"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -1474,6 +1474,30 @@ def beautify_image(img: Image.Image, strength) -> Image.Image:
     return _beautify_classic(img, strength)
 
 
+# ---------------- واجهة التصميم 2: خطوات العمل + مقارنة قبل/بعد ----------------
+_STEP_LABELS = ["📥 استيراد", "🎛 ضبط الإعدادات", "✂ صنع الصورة",
+                "✨ التجميل", "🖨 الطباعة والحفظ"]
+_STEP_HINTS = {1: "ابدأ باستيراد صورة من الأزرار أعلاه أو من مجلد الكاميرا",
+               2: "راجع الإعدادات على اليمين — أو اصنع مباشرة بالإعدادات المحفوظة",
+               3: "اضغط «اصنع صورة الهوية» في الأعلى",
+               4: "الصورة جاهزة — التجميل اختياري، ثم الطباعة",
+               5: "افتح «الطباعة والحفظ» في الأعلى لطباعة الورقة الجاهزة"}
+
+
+def _stepper_html(current):
+    """شريط خطوات العمل الخمس (تصميم 2): منجز/حالي/قادم + تلميح للخطوة."""
+    parts = []
+    for i, label in enumerate(_STEP_LABELS, start=1):
+        cls = "done" if i < current else ("cur" if i == current else "todo")
+        mark = "✔ " if i < current else f"{i} "
+        parts.append(f'<span class="step {cls}">{mark}{label}</span>')
+        if i < len(_STEP_LABELS):
+            parts.append('<span class="step-arrow">⟵</span>')
+    return ('<div class="steps">' + "".join(parts) +
+            f'<span class="step-hint">أنت في الخطوة {current} من 5 — '
+            f'{_STEP_HINTS[current]}</span></div>')
+
+
 def apply_beauty(strength):
     """تطبيق التجميل على آخر صورة مصنوعة (من النسخ الأصلية دائماً)."""
     ctx = _LAST_MAKE
@@ -1485,7 +1509,9 @@ def apply_beauty(strength):
         s = 0.0
     if s <= 0:
         std_path, hd_path, sheet_path, files = ctx["paths"]
-        return std_path, hd_path, sheet_path, files, "النسبة 0% — الصورة الأصلية كما هي دون تجميل."
+        return (std_path, hd_path, sheet_path, files,
+                "النسبة 0% — الصورة الأصلية كما هي دون تجميل.",
+                _stepper_html(4), gr.update(visible=False))
     # التجميل يُحسَب مرة واحدة على أكبر نسخة (الطباعة أو HD) وتُشتقّ الباقي
     # منها بالتصغير — أسرع بثلاث مرات ونتيجة متطابقة بين النسخ كلها.
     master_src = ctx["print"] if ctx.get("print") is not None else ctx["hd"]
@@ -1499,7 +1525,10 @@ def apply_beauty(strength):
         if _BEAUTY_ENGINE["last"] == "ai" else "بالمحرك الكلاسيكي"
     return (std_path, hd_path, sheet_path, files,
             f"طُبّق التجميل بنسبة {int(s)}% {engine} على الصورة القياسية وعالية الدقة وورقة الطباعة "
-            "(ملفات جديدة — الأصلية محفوظة في مجلد outputs). لإزالته اضغط «إلغاء التجميل».")
+            "(ملفات جديدة — الأصلية محفوظة في مجلد outputs). لإزالته اضغط «إلغاء التجميل». "
+            "اسحب خط المقارنة بالأسفل لترى قبل/بعد على نفس الصورة.",
+            _stepper_html(5),
+            gr.update(value=(ctx["paths"][1], hd_path), visible=True))
 
 
 def cancel_beauty():
@@ -1509,7 +1538,8 @@ def cancel_beauty():
         raise gr.Error("لا توجد صورة مصنوعة بعد.")
     std_path, hd_path, sheet_path, files = ctx["paths"]
     return (std_path, hd_path, sheet_path, files,
-            "أُلغي التجميل — عادت الصورة الأصلية كما صُنعت.")
+            "أُلغي التجميل — عادت الصورة الأصلية كما صُنعت.",
+            _stepper_html(4), gr.update(visible=False))
 
 
 # ----------------------------- الطباعة -----------------------------
@@ -2674,6 +2704,29 @@ body, body.dark {
   box-shadow: 0 8px 24px rgba(124, 58, 237, .18);
 }
 #beauty_panel label, #beauty_panel span, #beauty_panel p { color: #202938 !important; }
+/* ===== v15 (التصميم 2): شريط خطوات العمل ===== */
+#stepper { background: transparent !important; border: none !important; box-shadow: none !important; padding: 2px 0 0 !important; }
+.steps {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #FFFFFF; border: 1px solid #DFE4EE; border-radius: 14px;
+  padding: 10px 14px; box-shadow: 0 1px 3px rgba(20,30,50,.06);
+}
+.step {
+  padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: 13.5px;
+  border: 1.5px solid #D5DCE8; background: #FFFFFF; color: #41506A; white-space: nowrap;
+}
+.step.done { background: #2563EB; border-color: #2563EB; color: #FFFFFF; }
+.step.cur { background: #7C3AED; border-color: #7C3AED; color: #FFFFFF;
+            box-shadow: 0 4px 14px rgba(124,58,237,.35); }
+.step.todo { color: #8494AB; }
+.step-arrow { color: #9FB0C9; font-weight: 800; }
+.step-hint { margin-inline-start: auto; color: #66707D; font-size: 12.5px; }
+/* ===== v15: عارض مقارنة قبل/بعد (ImageSlider أصلي من Gradio) ===== */
+#beauty_compare { border: 1.5px solid #C9B8FA !important; border-radius: 12px; overflow: hidden; }
+/* ===== v15: شريط التنقّل السفلي ===== */
+#flowbar { margin-top: 12px; }
+#btn-flow-apply { background: #7C3AED !important; border-color: #7C3AED !important; color: #FFF !important; }
+#btn-flow-skip { background: #16A34A !important; border-color: #16A34A !important; color: #FFF !important; }
 /* ===== v13.1: القوائم المنسدلة فاتحة دائماً =====
    قائمة الخيارات المنبثقة كانت ترث خلفية Gradio الليلية (#0A0F1E) بينما نصّها
    من الثيم الفاتح — نص داكن على أسود فلا تُقرأ أسماء الطابعات ليلاً. */
@@ -2804,6 +2857,9 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
                                elem_id="btn-studio")
         save_settings_btn = gr.Button("💾 احفظ إعداداتي", variant="secondary", scale=2,
                                       elem_id="btn-save-top")
+
+    # ======== شريط خطوات العمل (التصميم 2) ========
+    stepper_html = gr.HTML(_stepper_html(1), elem_id="stepper")
 
     # ======== إشعارات الصور الجديدة (تعيش 30 ثانية) ========
     notif_slots = []
@@ -2937,6 +2993,29 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
 
         # ======== النتائج والسجل (يسار الشاشة) ========
         with gr.Column(scale=5, elem_id="col_results"):
+            # ======== فقاعة التجميل — أعلى العمود (التصميم 2): تظهر فقط بعد صنع صورة ========
+            with gr.Group(visible=False, elem_id="beauty_panel") as beauty_panel:
+                gr.Markdown("### ✨ التجميل — الصورة جاهزة، والتجميل اختياري\n"
+                            "تحسين حقيقي للوجه بمحرك ذكاء اصطناعي محلي: بشرة أنظف "
+                            "وإشراق طبيعي وتفتيح للوجوه الغامقة — بنسبة تتحكم فيها. "
+                            "اختر النوع أو حرّك المنزلق، ثم اضغط «تطبيق التجميل» — "
+                            "وبعدها اسحب خط المقارنة لترى قبل/بعد على نفس الصورة.")
+                beauty_preset = gr.Radio(
+                    list(BEAUTY_PRESETS), value=BEAUTY_PRESETS[0],
+                    label="نوع التجميل")
+                beauty_slider = gr.Slider(
+                    0, 100, value=0, step=5, label="نسبة التجميل %",
+                    info="0 = بدون تجميل — رجال خفيف 25 — نساء متوسط 50 — والمنزلق يضبطها كما تريد")
+                with gr.Row():
+                    beauty_apply_btn = gr.Button("✨ تطبيق التجميل", variant="primary")
+                    beauty_cancel_btn = gr.Button("↩ إلغاء التجميل", variant="secondary")
+                beauty_status = gr.Textbox(label="حالة التجميل", interactive=False)
+                compare_view = gr.ImageSlider(
+                    label="⇆ مقارنة قبل / بعد — اسحب الخط على نفس الصورة",
+                    type="filepath", format="jpeg", interactive=False,
+                    height=330, visible=False, elem_id="beauty_compare",
+                    show_label=True)
+
             gr.Markdown("### النتائج", elem_classes=["canvas-title"])
             with gr.Group(elem_classes=["result-panel"]):
                 gr.Markdown("**الصورة القياسية** — JPG بدقة 300 DPI")
@@ -2958,23 +3037,6 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
                 file_count="multiple"
             )
 
-            # ======== فقاعة التجميل (تظهر فقط بعد صنع صورة) ========
-            with gr.Group(visible=False, elem_id="beauty_panel") as beauty_panel:
-                gr.Markdown("### ✨ التجميل — الصورة جاهزة، والتجميل اختياري\n"
-                            "تحسين حقيقي للوجه بمحرك ذكاء اصطناعي محلي: بشرة أنظف "
-                            "وإشراق طبيعي وتفتيح للوجوه الغامقة — بنسبة تتحكم فيها. "
-                            "اختر النوع أو حرّك المنزلق، ثم اضغط «تطبيق التجميل».")
-                beauty_preset = gr.Radio(
-                    list(BEAUTY_PRESETS), value=BEAUTY_PRESETS[0],
-                    label="نوع التجميل")
-                beauty_slider = gr.Slider(
-                    0, 100, value=0, step=5, label="نسبة التجميل %",
-                    info="0 = بدون تجميل — رجال خفيف 25 — نساء متوسط 50 — والمنزلق يضبطها كما تريد")
-                with gr.Row():
-                    beauty_apply_btn = gr.Button("✨ تطبيق التجميل", variant="primary")
-                    beauty_cancel_btn = gr.Button("↩ إلغاء التجميل", variant="secondary")
-                beauty_status = gr.Textbox(label="حالة التجميل", interactive=False)
-
             list_head = gr.Button(_sec_label("🗂 السجل والمعرض", S["ui_list"]), elem_classes=["section-head"])
             with gr.Group(visible=S["ui_list"]) as list_group:
                 photo_rows = []
@@ -2993,6 +3055,14 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
                 _rows_ctx.__exit__(None, None, None)
                 gr.Markdown("السجل محفوظ دائماً في قاعدة بيانات البرنامج — يبقى بعد الإغلاق وتحديث الصفحة. زر «🗑 حذف» يزيل السجل من القائمة فقط — ملف الصورة في مجلد الكاميرا لا يُمسّ.")
                 unignore_btn = gr.Button("↩ إظهار الصور المحذوفة من القائمة", size="sm", variant="secondary")
+
+    # ======== شريط التنقّل السفلي بين الخطوات (التصميم 2) ========
+    with gr.Row(elem_id="flowbar"):
+        flow_back_btn = gr.Button("⬅ السابق: الضبط والصنع", variant="secondary", scale=2)
+        flow_apply_btn = gr.Button("✨ تطبيق التجميل والمتابعة", variant="primary",
+                                   scale=3, elem_id="btn-flow-apply")
+        flow_skip_btn = gr.Button("تخطَّ التجميل — اذهب للطباعة والحفظ 🖨",
+                                  variant="secondary", scale=3, elem_id="btn-flow-skip")
 
     # ======== استوديو الطباعة والحفظ (يظهر عند الطلب — v12) ========
     with gr.Group(visible=False, elem_id="print_studio") as print_studio:
@@ -3223,7 +3293,9 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
         """صنع الصورة + إظهار فقاعة التجميل مضبوطة من الصفر بعد كل صنع."""
         std_p, hd_p, sheet_p, files, status = make_id_photo(*args)
         return (std_p, hd_p, sheet_p, files, status,
-                gr.update(visible=True), BEAUTY_PRESETS[0], 0, "")
+                gr.update(visible=True), BEAUTY_PRESETS[0], 0, "",
+                _stepper_html(4),
+                gr.update(value=None, visible=False))
 
     tmake_btn.click(
         _ui_make,
@@ -3233,7 +3305,8 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
                 bright_s, contrast_s, satur_s, sharp_s,
                 shadows_s, highlights_s, temp_s],
         outputs=[out_std, out_hd, out_sheet, out_files, out_status,
-                 beauty_panel, beauty_preset, beauty_slider, beauty_status],
+                 beauty_panel, beauty_preset, beauty_slider, beauty_status,
+                 stepper_html, compare_view],
     )
 
     # ---------- التجميل: اختيار النوع يضبط المنزلق، والتطبيق/الإلغاء ----------
@@ -3244,12 +3317,17 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
 
     beauty_preset.change(_beauty_preset_level, inputs=[beauty_preset],
                          outputs=[beauty_slider])
+    BEAUTY_OUTPUTS = [out_std, out_hd, out_sheet, out_files, beauty_status,
+                      stepper_html, compare_view]
     beauty_apply_btn.click(
-        apply_beauty, inputs=[beauty_slider],
-        outputs=[out_std, out_hd, out_sheet, out_files, beauty_status])
+        apply_beauty, inputs=[beauty_slider], outputs=BEAUTY_OUTPUTS)
     beauty_cancel_btn.click(
-        cancel_beauty, inputs=None,
-        outputs=[out_std, out_hd, out_sheet, out_files, beauty_status])
+        cancel_beauty, inputs=None, outputs=BEAUTY_OUTPUTS)
+    # شريط التنقّل السفلي: نفس معالجات التجميل والطباعة، بلا ازدواج منطق
+    flow_apply_btn.click(
+        apply_beauty, inputs=[beauty_slider], outputs=BEAUTY_OUTPUTS)
+    flow_back_btn.click(
+        None, js="() => { window.scrollTo({top: 0, behavior: 'smooth'}); }")
     import_btn.click(
         None,
         js="() => { const fire = (el) => { if (!el) return; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) el.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); }; const c = document.querySelector('#col_canvas'); const dz = c.querySelector('.upload-container > button'); if (c.querySelector('.image-container img')) { const rm = c.querySelector('button[aria-label=\"Remove Image\"]'); if (rm && dz) { fire(rm); setTimeout(() => fire(dz), 700); return; } } if (dz) { fire(dz); return; } fire(c.querySelector('button[aria-label=\"Upload file\"]')); }")
@@ -3258,13 +3336,18 @@ with gr.Blocks(title=f"ID PHOTO STUDIO v{APP_VERSION} — صانع صور اله
         js="() => { const fire = (el) => { if (!el) return; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) el.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); }; fire(document.querySelector('#col_canvas button[aria-label=\"Capture from camera\"]')); const c = document.querySelector('#col_canvas'); if (c) c.scrollIntoView({behavior: 'smooth', block: 'center'}); }")
 
     def _open_studio(sheet_path):
-        return gr.update(visible=True), (sheet_path if sheet_path else gr.skip())
+        return (gr.update(visible=True),
+                (sheet_path if sheet_path else gr.skip()), _stepper_html(5))
 
+    _STUDIO_JS = ("(...args) => { setTimeout(() => { const s = document.querySelector("
+                  "'#print_studio'); if (s) s.scrollIntoView({behavior: 'smooth', "
+                  "block: 'start'}); }, 350); return args; }")
     studio_btn.click(
-        _open_studio, inputs=[out_sheet], outputs=[print_studio, studio_sheet],
-        js="(...args) => { setTimeout(() => { const s = document.querySelector("
-           "'#print_studio'); if (s) s.scrollIntoView({behavior: 'smooth', "
-           "block: 'start'}); }, 350); return args; }")
+        _open_studio, inputs=[out_sheet],
+        outputs=[print_studio, studio_sheet, stepper_html], js=_STUDIO_JS)
+    flow_skip_btn.click(
+        _open_studio, inputs=[out_sheet],
+        outputs=[print_studio, studio_sheet, stepper_html], js=_STUDIO_JS)
     studio_close_btn.click(lambda: gr.update(visible=False), inputs=None,
                            outputs=[print_studio])
     studio_print_btn.click(None, inputs=[out_files, sheet_radio,
