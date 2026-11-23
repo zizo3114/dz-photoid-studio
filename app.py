@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "13.5"
+APP_VERSION = "13.6"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -208,6 +208,21 @@ def _sanitize_settings(saved):
             and merged["custom_color"].startswith("#")
             and all(c in "0123456789abcdefABCDEF" for c in merged["custom_color"][1:])):
         merged["custom_color"] = DEFAULT_SETTINGS["custom_color"]
+    # شفاء حالة عالقة خطيرة: «لون مخصص» قيمته رمادية شبه بيضاء (مثل #F3F3F3
+    # من إعدادات قديمة) يجعل كل خلفية تخرج 243 بدل الأبيض النقي 255 بينما
+    # قسم الخلفية مطويّ فلا يراه المستخدم أبداً — قِيس حرفياً في نتيجة
+    # زبونة (خلفية موحّدة 243 في كل نقطة). لون مخصص شبه أبيض عديم التشبع
+    # لا يكون قصداً عملياً في صور الهوية، فيُعاد إلى «أبيض» عند التحميل.
+    # (اختيار مخصص ملوّن فعلاً — كريمي/مزرقّ — لا يُمسّ.)
+    if merged.get("color") == "لون مخصص…":
+        try:
+            _hx = merged["custom_color"].lstrip("#")
+            _r, _g, _b = (int(_hx[i:i + 2], 16) for i in (0, 2, 4))
+            if min(_r, _g, _b) >= 232 and max(_r, _g, _b) - min(_r, _g, _b) <= 10:
+                merged["color"] = DEFAULT_SETTINGS["color"]
+                merged["custom_color"] = DEFAULT_SETTINGS["custom_color"]
+        except Exception:
+            pass
     return merged
 
 
