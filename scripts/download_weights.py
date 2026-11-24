@@ -44,6 +44,19 @@ MODELS = [
         "dest": os.path.join(WEIGHTS, "gfpgan_1.4.onnx"),
         "min_size": 330_000_000,  # النموذج الحقيقي ≈ 340MB
         "required": False,
+        "fallback_note": "تنبيه: بدون هذا النموذج يعمل التجميل بالمحرك الكلاسيكي فقط — "
+                         "أعد تشغيل البرنامج وهو متصل بالإنترنت لإعادة المحاولة.",
+    },
+    {
+        "label": "نموذج قصّ الخلفية الاحترافي (ISNet)",
+        "size_label": "179MB",
+        "url": ("https://github.com/danielgatis/rembg/releases/"
+                "download/v0.0.0/isnet-general-use.onnx"),
+        "dest": os.path.join(WEIGHTS, "isnet-general-use.onnx"),
+        "min_size": 170_000_000,  # النموذج الحقيقي ≈ 179MB
+        "required": False,
+        "fallback_note": "تنبيه: بدون هذا النموذج يعمل قصّ الخلفية بالمحرك الأساسي — "
+                         "أعد تشغيل البرنامج وهو متصل بالإنترنت لإعادة المحاولة.",
     },
 ]
 
@@ -121,9 +134,8 @@ def main():
             continue
         if model["required"]:
             ok = False
-        else:
-            print("تنبيه: بدون هذا النموذج يعمل التجميل بالمحرك الكلاسيكي فقط — "
-                  "أعد تشغيل البرنامج وهو متصل بالإنترنت لإعادة المحاولة.")
+        elif model.get("fallback_note"):
+            print(model["fallback_note"])
     return 0 if ok else 1
 
 

@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "15.0"
+APP_VERSION = "16.0"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -296,19 +296,16 @@ def get_creator() -> IDCreator:
             # تعطيل إضافة التجميل: لا حاجة لها في صور الهوية، وتحتاج ملفاً ثنائياً
             # (جدول ألوان LUT) — تجاوزها يجعل البرنامج يعمل بنفس الشكل في كل النسخ.
             _creator.beauty_handler = lambda ctx: None
-            # تسجيل زاوية ميلان الوجه من الكشف الأول لكل تشغيل: المحرك (عند
-            # التصحيح) يدوّر صوره داخلياً ثم يعيد الكشف فيكتب زاوية ثانية شبه
-            # صفرية فوق الأولى — ومسار الجودة العالية يحتاج الزاوية الأصلية
-            # ليدوّر الأصلية كاملة الدقة بنفس مقدار المحرك تماماً.
-            def _dz_before(ctx):
-                _creator._dz_first_roll = None
+            # قصّ الخلفية: ISNet الاحترافي أولاً (إن وُجد نموذجه ونجحت
+            # فحوص سلامته) وإلا معالج MODNet الأساسي كما هو.
+            _orig_matting = _creator.matting_handler
 
-            def _dz_detect(ctx):
-                if getattr(_creator, "_dz_first_roll", None) is None and ctx.face:
-                    _creator._dz_first_roll = ctx.face.get("roll_angle")
+            def _dz_matting(ctx):
+                if not _isnet_matting(ctx):
+                    _orig_matting(ctx)
+                    _MATTING_ENGINE["last"] = "modnet"
 
-            _creator.before_all = _dz_before
-            _creator.after_detect = _dz_detect
+            _creator.matting_handler = _dz_matting
     return _creator
 
 
@@ -632,44 +629,270 @@ def build_virtual_bgra(orig_bgr: np.ndarray, capped_matting: np.ndarray):
     return refine_cutout_bgra(merged)
 
 
-def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw, face_alignment: bool):
+ISNET_MODEL_PATH = os.path.join(BASE_DIR, "hivision", "creator", "weights",
+                                "isnet-general-use.onnx")
+_ISNET_SESS = None
+_MATTING_ENGINE = {"last": None}
+
+
+def _get_isnet():
+    """جلسة ISNet الكسولة — False نهائياً عند غياب النموذج أو فشل تحميله."""
+    global _ISNET_SESS
+    if _ISNET_SESS is None:
+        try:
+            if os.path.exists(ISNET_MODEL_PATH) and \
+                    os.path.getsize(ISNET_MODEL_PATH) > 150_000_000:
+                import onnxruntime as ort
+                opts = ort.SessionOptions()
+                opts.enable_mem_pattern = False
+                _ISNET_SESS = ort.InferenceSession(
+                    ISNET_MODEL_PATH, sess_options=opts,
+                    providers=["CPUExecutionProvider"])
+                logger.info("ISNet matting model loaded")
+            else:
+                logger.info("ISNet model not present — MODNet matting")
+                _ISNET_SESS = False
+        except Exception:
+            logger.exception("ISNet model failed to load")
+            _ISNET_SESS = False
+    return _ISNET_SESS or None
+
+
+def _isnet_alpha(bgr):
+    """ألفا ISNet (float 0..1) بأبعاد الإدخال نفسها، أو None عند أي فشل.
+
+    التجهيز هو تجهيز DIS الأصلي حرفياً: تطبيع بأقصى قيمة في الصورة
+    نفسها، إزاحة 0.5، إدخال 1024×1024، وتمديد min-max للناتج. بتجهيز
+    ImageNet المعتاد يخرج النموذج خريطة حواف لا قناعاً (تُقاس بالتجربة).
+    """
+    sess = _get_isnet()
+    if sess is None:
+        return None
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    im = Image.fromarray(rgb).resize((1024, 1024), Image.LANCZOS)
+    arr = np.array(im).astype(np.float32)
+    arr = arr / max(float(arr.max()), 1e-6) - 0.5
+    x = np.transpose(arr, (2, 0, 1))[None].astype(np.float32)
+    out = sess.run(None, {sess.get_inputs()[0].name: x})[0]
+    pred = out[0, 0].astype(np.float32)
+    rng = float(pred.max() - pred.min())
+    if rng < 1e-6:
+        return None
+    pred = (pred - float(pred.min())) / rng
+    return cv2.resize(pred, (bgr.shape[1], bgr.shape[0]),
+                      interpolation=cv2.INTER_LINEAR)
+
+
+def _isnet_matting(ctx) -> bool:
+    """معالج قصّ ISNet: يملأ ctx كما يفعل extract_human الأساسي تماماً.
+
+    فحوص سلامة قبل قبول أي قناع: نسبة شخص معقولة في الإطار، الزوايا
+    الأربع خلفية، ووسط الإطار شخص. عند أي شك يعيد False فيتولّى
+    MODNet — فلا يخرج قصّ فاسد أبداً بسبب النموذج الجديد.
+    """
+    try:
+        img = ctx.processing_image
+        if img is None:
+            return False
+        a = _isnet_alpha(img)
+        if a is None:
+            return False
+        frac = float((a > 0.5).mean())
+        if not (0.02 <= frac <= 0.85):
+            logger.warning("ISNet mask rejected: person fraction %.3f", frac)
+            return False
+        h, w = a.shape
+        c = max(4, min(h, w) // 12)
+        corners = np.concatenate([a[:c, :c].ravel(), a[:c, -c:].ravel(),
+                                  a[-c:, :c].ravel(), a[-c:, -c:].ravel()])
+        if float((corners > 0.5).mean()) > 0.25:
+            logger.warning("ISNet mask rejected: corners not background")
+            return False
+        center = a[h // 4: 3 * h // 4, w // 4: 3 * w // 4]
+        if float((center > 0.5).mean()) < 0.25:
+            logger.warning("ISNet mask rejected: center not person")
+            return False
+        from hivision.creator.human_matting import hollow_out_fix
+        bgra = cv2.merge((img[:, :, 0], img[:, :, 1], img[:, :, 2],
+                          (np.clip(a, 0, 1) * 255).astype(np.uint8)))
+        fixed = hollow_out_fix(bgra)
+        ctx.processing_image = fixed
+        ctx.matting_image = fixed.copy()
+        _MATTING_ENGINE["last"] = "isnet"
+        return True
+    except Exception:
+        logger.exception("ISNet matting failed — MODNet fallback")
+        return False
+
+
+def _measure_roll_rect(bgra):
+    """قياس ميلان العينين ومستطيل الوجه على قصّ BGRA كامل الإطار.
+
+    الكشف يجري على نسخة مصغّرة (≤2000px) مركّبة على أبيض — والمستطيل
+    يُعاد لإحداثيات الصورة الأصلية. يعيد (roll_deg, (left, top, w, h))
+    أو None عند تعذّر القياس. (حارس _detect_face_lm مصمم للقصّات الضيقة
+    فلا يناسب الإطار الكامل — لذا قياس مستقل هنا.)"""
+    try:
+        import math
+        pil = composite_bg(bgra, (255, 255, 255), refine=False)
+        arr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        h, w = arr.shape[:2]
+        s = min(1.0, 2000 / max(h, w))
+        if s < 1.0:
+            small = cv2.resize(arr, (max(1, int(w * s)), max(1, int(h * s))),
+                               interpolation=cv2.INTER_AREA)
+        else:
+            small = arr
+        rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+        with _MTCNN_LOCK:
+            faces, landmarks = _get_mtcnn().detect(rgb)
+        if faces is None or len(faces) == 0 or landmarks is None:
+            return None
+        areas = [(float(f[2]) - float(f[0])) * (float(f[3]) - float(f[1]))
+                 for f in faces]
+        i = int(np.argmax(areas))
+        lm = np.asarray(landmarks, dtype=np.float32)
+        if lm.ndim == 2 and lm.shape[0] == 10:
+            pts = np.stack([lm[:5, i], lm[5:, i]], axis=1)
+        elif lm.ndim == 2 and lm.shape[1] == 10:
+            row = lm[i]
+            pts = np.stack([row[:5], row[5:]], axis=1)
+        else:
+            return None
+        roll = math.degrees(math.atan2(float(pts[1][1] - pts[0][1]),
+                                       float(pts[1][0] - pts[0][0])))
+        # تقدير ثانٍ على الصورة معكوسة أفقياً ثم فكّ العكس وتبديل العينين:
+        # متوسط التقديرين يلغي انحياز الكاشف المنهجي تجاه جهة معيّنة.
+        try:
+            rgb_f = cv2.flip(rgb, 1)
+            with _MTCNN_LOCK:
+                faces_f, landmarks_f = _get_mtcnn().detect(rgb_f)
+            if faces_f is not None and len(faces_f) and landmarks_f is not None:
+                areas_f = [(float(f2[2]) - float(f2[0])) *
+                           (float(f2[3]) - float(f2[1])) for f2 in faces_f]
+                j = int(np.argmax(areas_f))
+                lm_f = np.asarray(landmarks_f, dtype=np.float32)
+                if lm_f.ndim == 2 and lm_f.shape[0] == 10:
+                    pts_f = np.stack([lm_f[:5, j], lm_f[5:, j]], axis=1)
+                elif lm_f.ndim == 2 and lm_f.shape[1] == 10:
+                    row_f = lm_f[j]
+                    pts_f = np.stack([row_f[:5], row_f[5:]], axis=1)
+                else:
+                    pts_f = None
+                if pts_f is not None:
+                    w_f = rgb.shape[1]
+                    pts_u = pts_f.copy()
+                    pts_u[:, 0] = w_f - pts_u[:, 0]
+                    pts_u[[0, 1]] = pts_u[[1, 0]]
+                    pts_u[[3, 4]] = pts_u[[4, 3]]
+                    roll_u = math.degrees(math.atan2(
+                        float(pts_u[1][1] - pts_u[0][1]),
+                        float(pts_u[1][0] - pts_u[0][0])))
+                    roll = (roll + roll_u) / 2.0
+        except Exception:
+            pass
+        f = faces[i]
+        rect = (float(f[0]) / s, float(f[1]) / s,
+                (float(f[2]) - float(f[0])) / s, (float(f[3]) - float(f[1])) / s)
+        return roll, rect
+    except Exception:
+        logger.exception("Roll measurement failed")
+        return None
+
+
+def _measure_roll_orig(bgr):
+    """أفضل تقدير وحيد لميلان الوجه: كشف على الأصلية بدقة عالية (≤3000px)
+    مع متوسط الاتجاهين (الأصلية ومعكوسها أفقياً بعد فكّ العكس وتبديل
+    العينين) — يلغي انحياز الكاشف المنهجي. يعيد الدرجات أو None."""
+    try:
+        import math
+        h, w = bgr.shape[:2]
+        s = min(1.0, 3000 / max(h, w))
+        small = cv2.resize(bgr, (max(1, int(w * s)), max(1, int(h * s))),
+                           interpolation=cv2.INTER_AREA) if s < 1.0 else bgr
+
+        def _roll_of(img_bgr):
+            rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            with _MTCNN_LOCK:
+                faces, landmarks = _get_mtcnn().detect(rgb)
+            if faces is None or len(faces) == 0 or landmarks is None:
+                return None
+            areas = [(float(f[2]) - float(f[0])) * (float(f[3]) - float(f[1]))
+                     for f in faces]
+            i = int(np.argmax(areas))
+            lm = np.asarray(landmarks, dtype=np.float32)
+            if lm.ndim == 2 and lm.shape[0] == 10:
+                pts = np.stack([lm[:5, i], lm[5:, i]], axis=1)
+            elif lm.ndim == 2 and lm.shape[1] == 10:
+                row = lm[i]
+                pts = np.stack([row[:5], row[5:]], axis=1)
+            else:
+                return None
+            return pts
+
+        pts = _roll_of(small)
+        if pts is None:
+            return None
+        roll = math.degrees(math.atan2(float(pts[1][1] - pts[0][1]),
+                                       float(pts[1][0] - pts[0][0])))
+        try:
+            pts_f = _roll_of(cv2.flip(small, 1))
+            if pts_f is not None:
+                pts_u = pts_f.copy()
+                pts_u[:, 0] = small.shape[1] - pts_u[:, 0]
+                pts_u[[0, 1]] = pts_u[[1, 0]]
+                pts_u[[3, 4]] = pts_u[[4, 3]]
+                roll_u = math.degrees(math.atan2(
+                    float(pts_u[1][1] - pts_u[0][1]),
+                    float(pts_u[1][0] - pts_u[0][0])))
+                roll = (roll + roll_u) / 2.0
+        except Exception:
+            pass
+        return roll
+    except Exception:
+        logger.exception("Original roll measurement failed")
+        return None
+
+
+def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
+                face_alignment: bool, roll0=None):
     """
     إعادة بناء قصّ المحرك من الأصلية كاملة الدقة:
     نأخذ مستطيل الوجه الذي كشفه المحرك على النسخة المصغّرة، نطابقه على
     النسخة الافتراضية كاملة الدقة، ونعيد تشغيل حسابات القص نفسها.
     تعيد مصفوفة BGRA للقص عالي الدقة أو None عند عدم الإمكانية.
+
+    الاستقامة (v16): المحرك يُستدعى دائماً بلا محاذاة داخلية (تقديره من
+    كشف مصغّر صاخب — قلَب ميلاناً حقيقياً 1.5° إلى −1.5° في نتيجة
+    المستخدم 2026-11-24). التدوير الوحيد يحدث هنا: roll0 مقاسة مرة
+    واحدة على الأصلية كاملة الدقة بمتوسط الاتجاهين، ثم يُعاد كشف
+    المستطيل على الإطار المدوَّر (المستطيلات أمتن من الزوايا بكثير).
     """
     try:
         ctx = creator.ctx
         if ctx is None or ctx.face is None or ctx.face.get("rectangle") is None:
             return None
         roll = ctx.face.get("roll_angle") or 0
-        base_bgr = orig_bgr
-        if face_alignment:
-            first_roll = getattr(creator, "_dz_first_roll", None)
-            if first_roll is None:
-                # لا نعرف مقدار التدوير الذي طبّقه المحرك داخلياً — لا نخاطر
-                # بتركيب هندسة غير مؤكدة (كان ينتج وجهاً مقصوصاً)؛ نتراجع
-                # إلى نتيجة المحرك القياسية السليمة.
-                logger.warning("HQ path skipped: first-detect roll angle unknown")
-                return None
-            if abs(first_roll) > 2:
-                # المحرك دوّر صوره داخلياً بالزاوية الأصلية: ندوّر الأصلية
-                # كاملة الدقة بنفس الزاوية والأداة حتى تتطابق مع قناع الإزالة
-                # ومستطيل الوجه (كلاهما في إطار الصورة المدوَّرة).
-                from hivision.creator.rotation_adjust import rotate_bound_4channels
-                _alpha = np.full(orig_bgr.shape[:2], 255, dtype=np.uint8)
-                base_bgr = rotate_bound_4channels(
-                    orig_bgr, _alpha, -1 * first_roll)[0]
-        virt = build_virtual_bgra(base_bgr, ctx.matting_image)
+        virt = build_virtual_bgra(orig_bgr, ctx.matting_image)
         if virt is None:
             return None
         ch, cw = ctx.origin_image.shape[:2]
         k = virt.shape[1] / cw
         rect = ctx.face["rectangle"]
+        use_rect = [rect[0] * k, rect[1] * k, rect[2] * k, rect[3] * k]
+        if face_alignment and roll0 is not None and abs(roll0) >= 0.35:
+            from hivision.creator.rotation_adjust import \
+                rotate_bound_4channels
+            _b, _g, _r, _a = cv2.split(virt)
+            _rot3, virt, _, _, _, _ = rotate_bound_4channels(
+                cv2.merge((_b, _g, _r)), _a, -1 * roll0)
+            logger.info("HQ straighten: roll %.2f deg corrected once", roll0)
+            measured = _measure_roll_rect(virt)
+            if measured is not None:
+                use_rect = list(measured[1])
         ctx2 = Context(Params(size=size_hw))
         ctx2.matting_image = virt
-        ctx2.face = {"rectangle": [rect[0] * k, rect[1] * k, rect[2] * k, rect[3] * k],
+        ctx2.face = {"rectangle": use_rect,
                      "roll_angle": roll}
         hd_a, _std_a, _clothing, _typo = adjust_photo(ctx2)
         return hd_a
@@ -1099,7 +1322,10 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         with _CREATOR_LOCK:
             creator = get_creator()
             try:
-                result = creator(bgr, size=(height, width), face_alignment=bool(align_face), **CROP_PARAMS)
+                # المحاذاة الداخلية للمحرك معطّلة دائماً: تقديرها صاخب.
+                # الاستقامة تتم مرة واحدة في مسار الجودة العالية بزاوية
+                # مقاسة على الأصلية كاملة الدقة (roll0).
+                result = creator(bgr, size=(height, width), face_alignment=False, **CROP_PARAMS)
             except FaceError as e:
                 n = getattr(e, "face_num", 0)
                 if n == 0:
@@ -1117,7 +1343,17 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
                 small_src = int(width * _rrs) < width
             except Exception:
                 small_src = False
-            crop_hq = hq_rerender(bgr, creator, (height, width), bool(align_face))
+            roll0 = _measure_roll_orig(bgr) if align_face else None
+            crop_hq = hq_rerender(bgr, creator, (height, width),
+                                  bool(align_face), roll0)
+            if crop_hq is None and align_face:
+                # تراجع نادر: أعد تشغيل المحرك بمحاذاته الداخلية حتى لا
+                # تخرج النتيجة الاحتياطية مائلة تماماً بلا أي تصحيح.
+                try:
+                    result = creator(bgr, size=(height, width),
+                                     face_alignment=True, **CROP_PARAMS)
+                except Exception:
+                    logger.exception("Aligned fallback re-run failed")
         if crop_hq is not None:
             hq_used = True
             std_img = finalize_from_crop(crop_hq, width, height, rgb, adj=adj)
