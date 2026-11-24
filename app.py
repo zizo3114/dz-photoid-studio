@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "16.0"
+APP_VERSION = "16.1"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -698,16 +698,25 @@ def _isnet_matting(ctx) -> bool:
         if a is None:
             return False
         frac = float((a > 0.5).mean())
-        if not (0.02 <= frac <= 0.85):
+        if not (0.02 <= frac <= 0.92):
             logger.warning("ISNet mask rejected: person fraction %.3f", frac)
             return False
-        h, w = a.shape
-        c = max(4, min(h, w) // 12)
-        corners = np.concatenate([a[:c, :c].ravel(), a[:c, -c:].ravel(),
-                                  a[-c:, :c].ravel(), a[-c:, -c:].ravel()])
-        if float((corners > 0.5).mean()) > 0.25:
-            logger.warning("ISNet mask rejected: corners not background")
+        # القناع الحقيقي كتلة واحدة كبيرة (الشخص)؛ قناع الحواف الفاسد
+        # يتفتت إلى مئات القطع الصغيرة. (فحص الزوايا السابق رفض لقطات
+        # رأس ضيقة صحيحة — الأكتاف تملأ الزوايا السفلى شرعياً — فأُلغي.)
+        person = (a > 0.5).astype(np.uint8)
+        n_comp, _labels, stats, _cent = cv2.connectedComponentsWithStats(
+            person, connectivity=8)
+        if n_comp <= 1:
+            logger.warning("ISNet mask rejected: no component")
             return False
+        largest = float(stats[1:, cv2.CC_STAT_AREA].max()) / max(
+            float(person.sum()), 1.0)
+        if largest < 0.55:
+            logger.warning("ISNet mask rejected: fragmented (largest %.2f)",
+                           largest)
+            return False
+        h, w = a.shape
         center = a[h // 4: 3 * h // 4, w // 4: 3 * w // 4]
         if float((center > 0.5).mean()) < 0.25:
             logger.warning("ISNet mask rejected: center not person")
@@ -854,6 +863,63 @@ def _measure_roll_orig(bgr):
         return None
 
 
+def _landmarks_for_face(landmarks, i, n_faces):
+    """نقاط العلامات الخمس للوجه رقم i من خرج MTCNN بأيّ من شكليه."""
+    lm = np.asarray(landmarks, dtype=np.float32)
+    if lm.ndim == 2 and lm.shape[0] == 10:
+        return np.stack([lm[:5, i], lm[5:, i]], axis=1)
+    if lm.ndim == 2 and lm.shape[1] == 10:
+        row = lm[i]
+        return np.stack([row[:5], row[5:]], axis=1)
+    return None
+
+
+def _frontal_pose_ok(bgr: np.ndarray):
+    """حارس الوضعية: هل الوجه الأكبر من الأمام فعلاً؟
+
+    MTCNN «يخترع» علامات معقولة حتى على وجه جانبي صرف (بروفايل)،
+    فيمرّ البروفايل من المحرك ويخرج قصّاً مائلاً مشوّهاً. ثلاث نسب
+    هندسية من العلامات الخمس تنفجر معاً عند البروفايل فقط (قيست على
+    بطارية صور: بروفايل 1.88/1.58/0.35 مقابل أقرب وضعية ثلاثية
+    الأرباع شرعية 1.57/1.24/0.43):
+      • نسبة بُعد الأنف عن العينين (الأقصى/الأدنى) ≥ 1.75
+      • المسافة العمودية عينان→فم مقسومة على بُعد العينين ≥ 1.40
+      • بُعد العينين / عرض صندوق الوجه ≤ 0.37 مع نسبة أنف ≥ 1.6
+    يعيد True (من الأمام) / False (جانبي بوضوح) / None (لا كشف أو
+    التباس — عندها يقرر المحرك نفسه برسائله المعتادة).
+    """
+    try:
+        h, w = bgr.shape[:2]
+        s = min(1.0, 2000 / max(h, w))
+        small = (cv2.resize(bgr, (int(w * s), int(h * s)),
+                            interpolation=cv2.INTER_AREA) if s < 1.0 else bgr)
+        rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+        with _MTCNN_LOCK:
+            faces, landmarks = _get_mtcnn().detect(rgb)
+        if faces is None or len(faces) == 0 or landmarks is None:
+            return None
+        areas = [(float(f[2]) - float(f[0])) * (float(f[3]) - float(f[1]))
+                 for f in faces]
+        i = int(np.argmax(areas))
+        pts = _landmarks_for_face(landmarks, i, len(faces))
+        if pts is None:
+            return None
+        le, re_, nose, ml, mr = [pts[j] for j in range(5)]
+        dl = float(np.linalg.norm(nose - le))
+        dr = float(np.linalg.norm(nose - re_))
+        nose_ratio = max(dl, dr) / max(min(dl, dr), 1e-6)
+        eye_d = float(np.linalg.norm(re_ - le))
+        vert = float(np.linalg.norm((ml + mr) / 2 - (le + re_) / 2)) / max(eye_d, 1e-6)
+        box_w = float(faces[i][2] - faces[i][0])
+        eye_ratio = eye_d / max(box_w, 1e-6)
+        if (nose_ratio >= 1.75 and vert >= 1.40) or \
+                (eye_ratio <= 0.37 and nose_ratio >= 1.60):
+            return False
+        return True
+    except Exception:
+        return None
+
+
 def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
                 face_alignment: bool, roll0=None):
     """
@@ -875,7 +941,12 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
         roll = ctx.face.get("roll_angle") or 0
         virt = build_virtual_bgra(orig_bgr, ctx.matting_image)
         if virt is None:
-            return None
+            # أصلية صغيرة (تحت عتبة النسخة الافتراضية): لا توجد نسخة أكمل
+            # دقة، لكن الاستقامة الدقيقة بمقدّمنا يجب أن تعمل هنا أيضاً —
+            # بدون هذا يبقى القصّ الصغير تحت رحمة محاذاة المحرك الصاخبة
+            # (عتبة درجتين وتقدير مقلوب أحياناً). نكمل على قصّ المحرك
+            # نفسه بعد تنقية حوافه، والمستطيل يعاد كشفه عليه (k=1).
+            virt = refine_cutout_bgra(ctx.matting_image.copy())
         ch, cw = ctx.origin_image.shape[:2]
         k = virt.shape[1] / cw
         rect = ctx.face["rectangle"]
@@ -1319,6 +1390,8 @@ def _make_id_photo_impl(img, state, mode, size_label, custom_w_mm, custom_h_mm,
         if img is None:
             raise gr.Error("ارفع صورة أولاً — اضغط على مربع الصورة واختر صورة من جهازك.")
         bgr = normalize_input(img)
+        if _frontal_pose_ok(bgr) is False:
+            raise gr.Error("الوجه في الصورة ليس من الأمام — يبدو وجهاً جانبياً (بروفايل). صورة الهوية تتطلب وجهاً من الأمام ينظر نحو الكاميرا. أعد التصوير من الأمام — أو بدّل إلى الوضع اليدوي إن كنت متأكداً من الصورة.")
         with _CREATOR_LOCK:
             creator = get_creator()
             try:
