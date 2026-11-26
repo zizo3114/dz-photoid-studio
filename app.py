@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "17.0"
+APP_VERSION = "17.1"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -921,17 +921,27 @@ def _frontal_pose_ok(bgr: np.ndarray):
 
 
 def _level_shoulders_crop(bgra: np.ndarray) -> np.ndarray:
-    """تسوية الكتفين دون لمس الرأس (v17) — تعمل على قصّ الهوية نفسه.
+    """تسوية الكتفين دون لمس الرأس (v17، قُوّيت في v17.1) — على قصّ الهوية.
 
     العينان والكتفان قد يميلان باتجاهين متعاكسين في وقفة الزبون الطبيعية،
-    فتسوية الرأس على العينين وحدها قد تُظهر ميل الكتفين أكثر (حالة
-    المستخدم 2026-11-26: فرق 37 بكسل بين طرفي الكتفين عند حافتي القصّ
-    بعد تسوية العينين). لا تدوير واحد يسوّي الاثنين معاً، لذا نقيس خط
-    الكتفين كما يظهر في القصّ فعلاً — أعلى نقطة من صورة ظلّ الشخص عند
-    كل حافة جانبية تحت الذقن — وندير «الجسم فقط» من الرقبة إلى الأسفل
-    حول مركز الرقبة، بدمج ناعم عبر شريط الرقبة حتى لا يتحرك الرأس ولا
-    يظهر فاصل. حراس: زاوية بين 0.8° و6° وكتفان ظاهران عند الحافتين،
-    وإلا تُترك الصورة كما هي. أي فشل يعيد الأصل — تحسين لا يكسر الصنع.
+    فتسوية الرأس على العينين وحدها قد تُظهر ميل الكتفين أكثر. لا تدوير
+    واحد يسوّي الاثنين معاً، لذا نقيس خط الكتفين كما يظهر في القصّ فعلاً
+    (أعلى نقطة من صورة ظلّ الشخص عند كل حافة جانبية تحت الذقن) وندير
+    «الجسم فقط» من الرقبة إلى الأسفل حول مركز الرقبة.
+
+    تقوية v17.1 (حادثة مستخدم 2026-11-26: زبون ملتحٍ بإطار ضيّق خرج
+    جسمه مدوَّراً بإفراط مع «سراب» — حافة مزدوجة على الكتفين):
+    - الذقن تُقدَّر من علامات الوجه (الفم والعينان) لا من أسفل صندوق
+      الكاشف الذي تبتلعه اللحية، فلا يهبط محور التدوير وشريط الدمج
+      إلى الكتفين.
+    - شريط الدمج محصور في الرقبة ومُتحقَّق منه ضد خط الكتفين المقاس
+      وضد عرض الظلّ (الرقبة ضيّقة، الكتفان عريضان): إن لم توجد رقبة
+      آمنة للدمج تُترك الصورة كما هي — فلا سراب أبداً.
+    - يُطبَّق 85% من الزاوية المقاسة بسقف 4°.
+    - فحص ذاتي بعد التدوير: يُعاد القياس، ولا تُقبل التسوية إلا إذا
+      تحسّن فرق الكتفين فعلاً (≤45% من الأصلي) — يستحيل أن تخرج
+      الصورة أسوأ من أصلها بسبب هذه الميزة.
+    أي فشل أو حارس غير متحقّق يعيد الأصل دون تغيير.
     """
     try:
         import math
@@ -940,11 +950,17 @@ def _level_shoulders_crop(bgra: np.ndarray) -> np.ndarray:
         h, w = bgra.shape[:2]
         comp = composite_bg(bgra, (255, 255, 255), refine=False)
         arr = cv2.cvtColor(np.array(comp), cv2.COLOR_RGB2BGR)
-        _pts, rect = _detect_face_lm(arr)
-        if rect is None:
+        pts, rect = _detect_face_lm(arr)
+        if rect is None or pts is None or len(pts) != 5:
             return bgra
-        chin_y = float(rect[3])
         face_cx = (float(rect[0]) + float(rect[2])) / 2.0
+        eye_y = (float(pts[0][1]) + float(pts[1][1])) / 2.0
+        mouth_y = (float(pts[3][1]) + float(pts[4][1])) / 2.0
+        # ذقن تشريحية من العلامات — اللحية لا تبتلعها كما تبتلع أسفل الصندوق
+        chin_y = mouth_y + 0.85 * (mouth_y - eye_y)
+        chin_y = min(chin_y, float(rect[3]))
+        if chin_y <= mouth_y:
+            return bgra
         mask = bgra[:, :, 3] > 127
         if not (mask[int(h * 0.98), :max(3, w // 4)].any()
                 and mask[int(h * 0.98), w - max(3, w // 4):].any()):
@@ -953,41 +969,72 @@ def _level_shoulders_crop(bgra: np.ndarray) -> np.ndarray:
         y_lo = chin_y + 0.02 * h
         y_hi = min(chin_y + 0.50 * h, h - 1)
 
-        def _tip_y(xa, xb):
-            sub = mask[:, xa:xb]
+        def _tip_y(m, xa, xb):
+            sub = m[:, xa:xb]
             ys = np.where(sub.any(axis=1)
                           & (np.arange(h) >= y_lo)
                           & (np.arange(h) <= y_hi))[0]
             return float(ys.min()) if len(ys) else None
 
-        ly = _tip_y(0, ew)
-        ry = _tip_y(w - ew, w)
+        ly = _tip_y(mask, 0, ew)
+        ry = _tip_y(mask, w - ew, w)
         if ly is None or ry is None:
             return bgra
         xl, xr = ew / 2.0, w - ew / 2.0
         theta = math.degrees(math.atan2(ry - ly, xr - xl))
         if abs(theta) < 0.8 or abs(theta) > 6.0:
             return bgra
-        pivot = (face_cx, chin_y + 0.10 * h)
-        mat = cv2.getRotationMatrix2D(pivot, theta, 1.0)
+        # خط الكتفين عند المحور — شريط الدمج يجب أن ينتهي فوقه بأمان.
+        # الشريط ضيّق وملاصق للذقن والمحور داخله: إزاحة التدوير عند صفوف
+        # الشريط هي مصدر «السراب» (حافة مزدوجة)، وتصغير بُعد الصفوف عن
+        # المحور إلى ~0.02h يُبقيها ≤4 بكسل — غير مرئية. (قياس فعلي على
+        # قصّ المستخدم: عرض الظلّ يتّسع من 0.37 عند الذقن إلى 0.73 عند
+        # chin+0.09h حيث كان شريط v17.0 — فوق منحدر الكتفين لا الرقبة.)
+        sh_y = ly + (ry - ly) * (face_cx - xl) / (xr - xl)
+        y0 = int(round(chin_y + 0.005 * h))
+        y1 = int(round(min(chin_y + 0.04 * h, sh_y - 0.05 * h)))
+        if y1 - y0 < int(round(0.018 * h)):
+            return bgra          # لا رقبة آمنة للدمج (أكتاف ملاصقة للذقن)
+        # الدمج فوق الرقبة الضيّقة فقط: عرض الظلّ عند أسفل الشريط يجب أن
+        # يكون أضيق بكثير من عرضه عند خط الكتفين، وإلا فالشريط على الكتفين
+        def _width_at(yy):
+            row = mask[int(min(max(yy, 0), h - 1))]
+            xs = np.where(row)[0]
+            return (xs.max() - xs.min()) if len(xs) else 0
+        if _width_at(y1) > 0.62 * max(1, _width_at(sh_y)):
+            return bgra
+        # حارس مطلق ثانٍ: إن كان الظلّ عند الذقن نفسه أعرض من نصف الصورة
+        # فالرأس غارق بين الكتفين (رقبة قصيرة/لحية كثيفة) وأي تدوير للجسم
+        # يلوي وصلة الرأس بالكتفين — حالة زبون 2026-11-26 (0.56 عنده
+        # مقابل 0.37 في صورة المستخدم التي نجحت فيها التسوية).
+        if _width_at(int(chin_y)) > 0.48 * w:
+            return bgra
+        apply_theta = max(-4.0, min(4.0, theta * 0.85))
+        pivot = (face_cx, chin_y + 0.022 * h)   # المحور داخل شريط الدمج
+        mat = cv2.getRotationMatrix2D(pivot, apply_theta, 1.0)
         rot = cv2.warpAffine(bgra, mat, (w, h), flags=cv2.INTER_CUBIC,
                              borderMode=cv2.BORDER_CONSTANT,
                              borderValue=(0, 0, 0, 0))
-        # دمج ناعم عبر الرقبة: فوق الشريط الأصل، تحته المدوَّر.
-        y0 = int(round(chin_y + 0.01 * h))
-        y1 = int(round(chin_y + 0.09 * h))
-        y0 = max(0, min(y0, h - 1))
-        y1 = max(y0 + 1, min(y1, h))
         ramp = np.zeros((h, 1), np.float32)
         ramp[y0:y1, 0] = np.linspace(0.0, 1.0, y1 - y0, dtype=np.float32)
         ramp[y1:, 0] = 1.0
         a = np.repeat(ramp, w, axis=1)[:, :, None]
         out = (bgra.astype(np.float32) * (1.0 - a)
                + rot.astype(np.float32) * a)
-        logger.info("Shoulder levelling: %.2f deg applied "
-                    "(edge tips dy %.0f px over %.0f px)",
-                    theta, ry - ly, xr - xl)
-        return np.clip(out, 0, 255).astype(np.uint8)
+        out = np.clip(out, 0, 255).astype(np.uint8)
+        # فحص ذاتي: أعد القياس على النتيجة — لا قبول دون تحسّن حقيقي
+        mask2 = out[:, :, 3] > 127
+        ly2 = _tip_y(mask2, 0, ew)
+        ry2 = _tip_y(mask2, w - ew, w)
+        if ly2 is None or ry2 is None or abs(ry2 - ly2) > 0.45 * abs(ry - ly):
+            logger.info("Shoulder levelling rejected by self-check "
+                        "(dy %.0f -> %s)", ry - ly,
+                        "?" if ly2 is None else f"{ry2 - ly2:.0f}")
+            return bgra
+        logger.info("Shoulder levelling: %.2f deg applied (of %.2f "
+                    "measured; edge tips dy %.0f -> %.0f px)",
+                    apply_theta, theta, ry - ly, ry2 - ly2)
+        return out
     except Exception:
         logger.exception("Shoulder levelling failed; keeping original")
         return bgra
