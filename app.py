@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "17.1"
+APP_VERSION = "17.2"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -920,51 +920,34 @@ def _frontal_pose_ok(bgr: np.ndarray):
         return None
 
 
-def _level_shoulders_crop(bgra: np.ndarray) -> np.ndarray:
-    """تسوية الكتفين دون لمس الرأس (v17، قُوّيت في v17.1) — على قصّ الهوية.
-
-    العينان والكتفان قد يميلان باتجاهين متعاكسين في وقفة الزبون الطبيعية،
-    فتسوية الرأس على العينين وحدها قد تُظهر ميل الكتفين أكثر. لا تدوير
-    واحد يسوّي الاثنين معاً، لذا نقيس خط الكتفين كما يظهر في القصّ فعلاً
-    (أعلى نقطة من صورة ظلّ الشخص عند كل حافة جانبية تحت الذقن) وندير
-    «الجسم فقط» من الرقبة إلى الأسفل حول مركز الرقبة.
-
-    تقوية v17.1 (حادثة مستخدم 2026-11-26: زبون ملتحٍ بإطار ضيّق خرج
-    جسمه مدوَّراً بإفراط مع «سراب» — حافة مزدوجة على الكتفين):
-    - الذقن تُقدَّر من علامات الوجه (الفم والعينان) لا من أسفل صندوق
-      الكاشف الذي تبتلعه اللحية، فلا يهبط محور التدوير وشريط الدمج
-      إلى الكتفين.
-    - شريط الدمج محصور في الرقبة ومُتحقَّق منه ضد خط الكتفين المقاس
-      وضد عرض الظلّ (الرقبة ضيّقة، الكتفان عريضان): إن لم توجد رقبة
-      آمنة للدمج تُترك الصورة كما هي — فلا سراب أبداً.
-    - يُطبَّق 85% من الزاوية المقاسة بسقف 4°.
-    - فحص ذاتي بعد التدوير: يُعاد القياس، ولا تُقبل التسوية إلا إذا
-      تحسّن فرق الكتفين فعلاً (≤45% من الأصلي) — يستحيل أن تخرج
-      الصورة أسوأ من أصلها بسبب هذه الميزة.
-    أي فشل أو حارس غير متحقّق يعيد الأصل دون تغيير.
-    """
+def _shoulder_geometry(bgra):
+    """هندسة الكتفين في قصّ هوية: وجه وعلامات وذقن تشريحية وأطراف
+    الكتفين عند الحافتين وزاوية خطّهما وتغطية الصفّ السفلي — أو None
+    إن تعذّر القياس. قياس فقط، بلا عتبات ولا حرّاس؛ القرار في
+    _level_decision."""
     try:
         import math
         if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
-            return bgra
+            return None
         h, w = bgra.shape[:2]
         comp = composite_bg(bgra, (255, 255, 255), refine=False)
         arr = cv2.cvtColor(np.array(comp), cv2.COLOR_RGB2BGR)
         pts, rect = _detect_face_lm(arr)
         if rect is None or pts is None or len(pts) != 5:
-            return bgra
+            return None
         face_cx = (float(rect[0]) + float(rect[2])) / 2.0
         eye_y = (float(pts[0][1]) + float(pts[1][1])) / 2.0
         mouth_y = (float(pts[3][1]) + float(pts[4][1])) / 2.0
-        # ذقن تشريحية من العلامات — اللحية لا تبتلعها كما تبتلع أسفل الصندوق
+        # ذقن تشريحية من العلامات — اللحية لا تبتلعها كما تبتلع أسفل
+        # صندوق الكاشف (درس v17.1)
         chin_y = mouth_y + 0.85 * (mouth_y - eye_y)
         chin_y = min(chin_y, float(rect[3]))
         if chin_y <= mouth_y:
-            return bgra
+            return None
         mask = bgra[:, :, 3] > 127
         if not (mask[int(h * 0.98), :max(3, w // 4)].any()
                 and mask[int(h * 0.98), w - max(3, w // 4):].any()):
-            return bgra          # الكتفان غير ظاهرين حتى أسفل القصّ
+            return None          # الكتفان غير ظاهرين حتى أسفل القصّ
         ew = max(3, int(round(0.015 * w)))
         y_lo = chin_y + 0.02 * h
         y_hi = min(chin_y + 0.50 * h, h - 1)
@@ -979,66 +962,167 @@ def _level_shoulders_crop(bgra: np.ndarray) -> np.ndarray:
         ly = _tip_y(mask, 0, ew)
         ry = _tip_y(mask, w - ew, w)
         if ly is None or ry is None:
-            return bgra
+            return None
         xl, xr = ew / 2.0, w - ew / 2.0
         theta = math.degrees(math.atan2(ry - ly, xr - xl))
+        return {"h": h, "w": w, "rect": rect, "face_cx": face_cx,
+                "chin_y": chin_y, "mask": mask, "ly": ly, "ry": ry,
+                "theta": theta, "dy": ry - ly,
+                "cov": float(mask[int(h * 0.99)].mean())}
+    except Exception:
+        logger.exception("Shoulder geometry failed")
+        return None
+
+
+def _level_decision(geo):
+    """قرار التسوية وحرّاسها (v17.1) على هندسة مقاسة: يعيد
+    {apply_theta, y0, y1, pivot} بإحداثيات القصّ المقاس، أو None.
+
+    الحرّاس: شريط الدمج محصور في الرقبة ومُتحقَّق منه ضد خطّ الكتفين
+    المقاس وضد عرض الظلّ (الرقبة ضيّقة، الكتفان عريضان) — إن لم توجد
+    رقبة آمنة للدمج تُترك الصورة كما هي، فلا «سراب» أبداً. ويُطبَّق
+    85% من الزاوية المقاسة بسقف 4°."""
+    try:
+        h, w, mask = geo["h"], geo["w"], geo["mask"]
+        chin_y, face_cx = geo["chin_y"], geo["face_cx"]
+        ly, ry, theta = geo["ly"], geo["ry"], geo["theta"]
         if abs(theta) < 0.8 or abs(theta) > 6.0:
-            return bgra
+            return None
         # خط الكتفين عند المحور — شريط الدمج يجب أن ينتهي فوقه بأمان.
-        # الشريط ضيّق وملاصق للذقن والمحور داخله: إزاحة التدوير عند صفوف
-        # الشريط هي مصدر «السراب» (حافة مزدوجة)، وتصغير بُعد الصفوف عن
-        # المحور إلى ~0.02h يُبقيها ≤4 بكسل — غير مرئية. (قياس فعلي على
-        # قصّ المستخدم: عرض الظلّ يتّسع من 0.37 عند الذقن إلى 0.73 عند
-        # chin+0.09h حيث كان شريط v17.0 — فوق منحدر الكتفين لا الرقبة.)
+        # الشريط ضيّق وملاصق للذقن والمحور داخله: إزاحة التدوير عند
+        # صفوف الشريط هي مصدر «السراب» (حافة مزدوجة)، وحصر بُعدها في
+        # ~0.02h يُبقي الإزاحة ≤4 بكسل — غير مرئية. (قياس فعلي: عرض
+        # الظلّ يتّسع من 0.37 عند الذقن إلى 0.73 عند chin+0.09h حيث
+        # كان شريط v17.0 — فوق منحدر الكتفين لا الرقبة.)
+        ew = max(3, int(round(0.015 * w)))
+        xl, xr = ew / 2.0, w - ew / 2.0
         sh_y = ly + (ry - ly) * (face_cx - xl) / (xr - xl)
         y0 = int(round(chin_y + 0.005 * h))
         y1 = int(round(min(chin_y + 0.04 * h, sh_y - 0.05 * h)))
         if y1 - y0 < int(round(0.018 * h)):
-            return bgra          # لا رقبة آمنة للدمج (أكتاف ملاصقة للذقن)
-        # الدمج فوق الرقبة الضيّقة فقط: عرض الظلّ عند أسفل الشريط يجب أن
-        # يكون أضيق بكثير من عرضه عند خط الكتفين، وإلا فالشريط على الكتفين
+            return None          # لا رقبة آمنة للدمج (أكتاف ملاصقة للذقن)
+
         def _width_at(yy):
             row = mask[int(min(max(yy, 0), h - 1))]
             xs = np.where(row)[0]
             return (xs.max() - xs.min()) if len(xs) else 0
-        if _width_at(y1) > 0.62 * max(1, _width_at(sh_y)):
-            return bgra
-        # حارس مطلق ثانٍ: إن كان الظلّ عند الذقن نفسه أعرض من نصف الصورة
-        # فالرأس غارق بين الكتفين (رقبة قصيرة/لحية كثيفة) وأي تدوير للجسم
-        # يلوي وصلة الرأس بالكتفين — حالة زبون 2026-11-26 (0.56 عنده
-        # مقابل 0.37 في صورة المستخدم التي نجحت فيها التسوية).
-        if _width_at(int(chin_y)) > 0.48 * w:
-            return bgra
-        apply_theta = max(-4.0, min(4.0, theta * 0.85))
-        pivot = (face_cx, chin_y + 0.022 * h)   # المحور داخل شريط الدمج
-        mat = cv2.getRotationMatrix2D(pivot, apply_theta, 1.0)
-        rot = cv2.warpAffine(bgra, mat, (w, h), flags=cv2.INTER_CUBIC,
-                             borderMode=cv2.BORDER_CONSTANT,
-                             borderValue=(0, 0, 0, 0))
-        ramp = np.zeros((h, 1), np.float32)
-        ramp[y0:y1, 0] = np.linspace(0.0, 1.0, y1 - y0, dtype=np.float32)
-        ramp[y1:, 0] = 1.0
-        a = np.repeat(ramp, w, axis=1)[:, :, None]
-        out = (bgra.astype(np.float32) * (1.0 - a)
-               + rot.astype(np.float32) * a)
-        out = np.clip(out, 0, 255).astype(np.uint8)
-        # فحص ذاتي: أعد القياس على النتيجة — لا قبول دون تحسّن حقيقي
-        mask2 = out[:, :, 3] > 127
-        ly2 = _tip_y(mask2, 0, ew)
-        ry2 = _tip_y(mask2, w - ew, w)
-        if ly2 is None or ry2 is None or abs(ry2 - ly2) > 0.45 * abs(ry - ly):
-            logger.info("Shoulder levelling rejected by self-check "
-                        "(dy %.0f -> %s)", ry - ly,
-                        "?" if ly2 is None else f"{ry2 - ly2:.0f}")
-            return bgra
-        logger.info("Shoulder levelling: %.2f deg applied (of %.2f "
-                    "measured; edge tips dy %.0f -> %.0f px)",
-                    apply_theta, theta, ry - ly, ry2 - ly2)
-        return out
-    except Exception:
-        logger.exception("Shoulder levelling failed; keeping original")
-        return bgra
 
+        if _width_at(y1) > 0.62 * max(1, _width_at(sh_y)):
+            return None
+        # حارس مطلق: إن كان الظلّ عند الذقن نفسه أعرض من نصف الصورة
+        # فالرأس غارق بين الكتفين (رقبة قصيرة/لحية كثيفة) وأي تدوير
+        # للجسم يلوي وصلة الرأس بالكتفين — حالة زبون 2026-11-26
+        # (0.56 عنده مقابل 0.37 في صورة المستخدم الناجحة).
+        if _width_at(int(chin_y)) > 0.48 * w:
+            return None
+        # حرّاس مرساة الوجه (v17.2 — درس جهاز المستخدم): الحرّاس أعلاه
+        # تُقاس على هندسة القصّ، ونافذة القصّ نفسها تتغيّر بتغيّر محرك
+        # العزل (ISNet على جهاز المستخدم مقابل MODNet في تجاربنا)،
+        # فمرّت التسوية على جهازه لجسمٍ رفضته تجاربنا (ورقة الزبون
+        # الملتحي 2026-11-26: جسم مدوَّر وأسفل مائل). النسب المرساة
+        # على صندوق الوجه لا تتأثر بالنافذة ولا بالمحرك: فراغ
+        # الذقن–الكتفين نسبةً لارتفاع الوجه، وعرض الظلّ عند الذقن
+        # نسبةً لعرض الوجه. قياسات الحالات الحقيقية الثلاث: الغارق
+        # 0.21 و1.21 — والسليمة 0.37/0.43 و0.85/0.88.
+        face_w = float(geo["rect"][2] - geo["rect"][0])
+        face_h = float(geo["rect"][3] - geo["rect"][1])
+        if face_h <= 0 or face_w <= 0:
+            return None
+        if (sh_y - chin_y) < 0.28 * face_h:
+            return None          # رقبة أقصر من أن تُدار حولها بأمان
+        if _width_at(int(chin_y)) > 1.05 * face_w:
+            return None          # الظلّ عند الذقن أعرض من الوجه نفسه
+        apply_theta = max(-4.0, min(4.0, theta * 0.85))
+        return {"apply_theta": apply_theta, "y0": y0, "y1": y1,
+                "pivot": (face_cx, chin_y + 0.022 * h)}
+    except Exception:
+        logger.exception("Shoulder levelling decision failed")
+        return None
+
+
+def _warp_body_region(bgra, apply_theta, pivot, y0, y1):
+    """تدوير «الجسم فقط» من الرقبة إلى الأسفل حول محور الرقبة، بدمج
+    متدرّج عبر شريط الرقبة [y0, y1] — ما فوق الشريط (الرأس) لا يُلمس."""
+    h, w = bgra.shape[:2]
+    mat = cv2.getRotationMatrix2D(
+        (float(pivot[0]), float(pivot[1])), float(apply_theta), 1.0)
+    rot = cv2.warpAffine(bgra, mat, (w, h), flags=cv2.INTER_CUBIC,
+                         borderMode=cv2.BORDER_CONSTANT,
+                         borderValue=(0, 0, 0, 0))
+    y0 = int(min(max(round(float(y0)), 0), h - 1))
+    y1 = int(min(max(round(float(y1)), y0 + 1), h))
+    ramp = np.zeros((h, 1), np.float32)
+    ramp[y0:y1, 0] = np.linspace(0.0, 1.0, y1 - y0, dtype=np.float32)
+    ramp[y1:, 0] = 1.0
+    a = np.repeat(ramp, w, axis=1)[:, :, None]
+    out = (bgra.astype(np.float32) * (1.0 - a)
+           + rot.astype(np.float32) * a)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _level_via_frame(virt, use_rect, size_hw, roll, crop0):
+    """تسوية الكتفين على الإطار الكامل ثم إعادة القصّ (v17.2).
+
+    حتى v17.1 كان الجسم يُدار داخل القصّ الجاهز — والقصّ مقطوع أصلاً،
+    فما تحت حافته السفلية غير موجود فيه: التدوير يرفع حافة القميص عن
+    زاوية القصّ فيظهر «أسفل غير مكتمل» (شكوى المستخدم 2026-11-26)،
+    ولا يصحّ إكماله بتمديد لوني مُختلق — الصورة الأصلية كاملة والجسم
+    الحقيقي موجود تحت نافذة القصّ في الإطار الكامل. لذا: القياس
+    والحرّاس على القصّ (كما في v17.1)، ثم يُنقل المحور وشريط الدمج
+    إلى إحداثيات الإطار الكامل بمرساة صندوق الوجه، يُدار جسم الإطار
+    الكامل، ويُعاد تشغيل adjust_photo — كل بكسل في النتيجة من
+    الأصلية الحقيقية. فحص ذاتي على القصّ الجديد: تحسّن فرق الكتفين
+    (≤45% من الأصلي) وعدم تراجع تغطية الأسفل؛ أي فشل يعيد None
+    فيُستعمل القصّ الأصلي دون تسوية."""
+    try:
+        geo = _shoulder_geometry(crop0)
+        if geo is None:
+            return None
+        dec = _level_decision(geo)
+        if dec is None:
+            return None
+        rect = geo["rect"]
+        fx, fy = float(rect[0]), float(rect[1])
+        fw = float(rect[2]) - fx
+        if fw <= 0 or float(use_rect[2]) <= 0:
+            return None
+        s = fw / float(use_rect[2])     # بكسل قصّ لكل بكسل إطار
+
+        def _map_x(px):
+            return float(use_rect[0]) + (px - fx) / s
+
+        def _map_y(py):
+            return float(use_rect[1]) + (py - fy) / s
+
+        warped = _warp_body_region(
+            virt, dec["apply_theta"],
+            (_map_x(dec["pivot"][0]), _map_y(dec["pivot"][1])),
+            _map_y(dec["y0"]), _map_y(dec["y1"]))
+        ctx3 = Context(Params(size=size_hw))
+        ctx3.matting_image = warped
+        ctx3.face = {"rectangle": list(use_rect), "roll_angle": roll}
+        hd_a, _std_a, _clothing, _typo = adjust_photo(ctx3)
+        if hd_a is None:
+            return None
+        geo2 = _shoulder_geometry(hd_a)
+        if geo2 is None or abs(geo2["dy"]) > 0.45 * abs(geo["dy"]):
+            logger.info("Shoulder levelling rejected by self-check "
+                        "(dy %.0f -> %s)", geo["dy"],
+                        "?" if geo2 is None else f"{geo2['dy']:.0f}")
+            return None
+        if geo2["cov"] < geo["cov"] - 0.02:
+            logger.info("Shoulder levelling rejected: bottom coverage "
+                        "%.2f -> %.2f", geo["cov"], geo2["cov"])
+            return None
+        logger.info("Shoulder levelling: %.2f deg applied (of %.2f "
+                    "measured; edge tips dy %.0f -> %.0f px; full "
+                    "frame)", dec["apply_theta"], geo["theta"],
+                    geo["dy"], geo2["dy"])
+        return hd_a
+    except Exception:
+        logger.exception("Shoulder levelling (full frame) failed; "
+                         "keeping original crop")
+        return None
 
 def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
                 face_alignment: bool, roll0=None):
@@ -1051,8 +1135,9 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
     الاستقامة (v16): المحرك يُستدعى دائماً بلا محاذاة داخلية (تقديره من
     كشف مصغّر صاخب — قلَب ميلاناً حقيقياً 1.5° إلى −1.5° في نتيجة
     المستخدم 2026-11-24). التدوير الوحيد يحدث هنا: roll0 مقاسة مرة
-    واحدة على الأصلية كاملة الدقة بمتوسط الاتجاهين، ثم يُعاد كشف
-    المستطيل على الإطار المدوَّر (المستطيلات أمتن من الزوايا بكثير).
+    واحدة على الأصلية كاملة الدقة بمتوسط الاتجاهين، ومستطيل المحرك
+    يُنقل إلى الإطار المدوَّر هندسياً بنفس مصفوفة التدوير (إعادة كشفه
+    أعادت صندوقاً أصغر فبترت الأسفل — إصلاح v17.2).
     """
     try:
         ctx = creator.ctx
@@ -1074,22 +1159,49 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
         if face_alignment and roll0 is not None and abs(roll0) >= 0.35:
             from hivision.creator.rotation_adjust import \
                 rotate_bound_4channels
+            _ph, _pw = virt.shape[:2]
             _b, _g, _r, _a = cv2.split(virt)
-            _rot3, virt, _, _, _, _ = rotate_bound_4channels(
+            _rot3, virt, _cos, _sin, _dW, _dH = rotate_bound_4channels(
                 cv2.merge((_b, _g, _r)), _a, -1 * roll0)
             logger.info("HQ straighten: roll %.2f deg corrected once", roll0)
-            measured = _measure_roll_rect(virt)
-            if measured is not None:
-                use_rect = list(measured[1])
+            # مستطيل الوجه يُحوَّل بنفس مصفوفة التدوير هندسياً — لا يُعاد
+            # كشفه. إعادة الكشف على الافتراضية أعادت صندوقاً أصغر وأخفض
+            # (حالة 2026-11-26: صندوق أضيق بـ12% ومركز أخفض) فصغّر
+            # adjust_photo نافذة القصّ وبتر أسفل الصورة (أكتاف مقصوصة)،
+            # بينما صندوق المحرك نفسه يعطي تأطيراً كاملاً. التحويل الهندسي
+            # يحفظ تأطير المحرك حرفياً وينقله للإطار المدوَّر.
+            try:
+                _M = cv2.getRotationMatrix2D((_pw / 2.0, _ph / 2.0),
+                                             float(roll0), 1.0)
+                _M[0, 2] += _dW / 2.0
+                _M[1, 2] += _dH / 2.0
+                _x, _y, _w, _h = (float(v) for v in use_rect)
+                _corners = np.array(
+                    [[_x, _y], [_x + _w, _y], [_x, _y + _h],
+                     [_x + _w, _y + _h]], dtype=np.float64)
+                _tc = _corners @ _M[:, :2].T + _M[:, 2]
+                use_rect = [float(_tc[:, 0].min()), float(_tc[:, 1].min()),
+                            float(_tc[:, 0].max() - _tc[:, 0].min()),
+                            float(_tc[:, 1].max() - _tc[:, 1].min())]
+            except Exception:
+                logger.exception("Rect transform failed; re-detecting")
+                measured = _measure_roll_rect(virt)
+                if measured is not None:
+                    use_rect = list(measured[1])
         ctx2 = Context(Params(size=size_hw))
         ctx2.matting_image = virt
         ctx2.face = {"rectangle": use_rect,
                      "roll_angle": roll}
         hd_a, _std_a, _clothing, _typo = adjust_photo(ctx2)
         if face_alignment:
-            # تسوية الكتفين على القصّ النهائي: الجسم فقط يُدار من الرقبة،
-            # والرأس المستوي على العينين لا يُلمس.
-            hd_a = _level_shoulders_crop(hd_a)
+            # تسوية الكتفين: تُقاس على القصّ، لكن تدوير الجسم يقع على
+            # الإطار الكامل ثم يُعاد القصّ — الأسفل يكتمل من بكسلات
+            # الأصلية الحقيقية الموجودة تحت نافذة القصّ، لا من أي
+            # تمديد أو اختلاق (v17.2). الرأس لا يُلمس.
+            levelled = _level_via_frame(virt, use_rect, size_hw, roll,
+                                        hd_a)
+            if levelled is not None:
+                hd_a = levelled
         return hd_a
     except Exception:
         # لا تبتلع الفشل بصمت: مسار الجودة العالية هو الفرق بين قصّ حاد من
