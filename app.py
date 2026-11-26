@@ -60,7 +60,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-APP_VERSION = "16.1"
+APP_VERSION = "17.0"
 
 logger = logging.getLogger("dz_photoid_studio")
 logger.setLevel(logging.INFO)
@@ -920,6 +920,79 @@ def _frontal_pose_ok(bgr: np.ndarray):
         return None
 
 
+def _level_shoulders_crop(bgra: np.ndarray) -> np.ndarray:
+    """تسوية الكتفين دون لمس الرأس (v17) — تعمل على قصّ الهوية نفسه.
+
+    العينان والكتفان قد يميلان باتجاهين متعاكسين في وقفة الزبون الطبيعية،
+    فتسوية الرأس على العينين وحدها قد تُظهر ميل الكتفين أكثر (حالة
+    المستخدم 2026-11-26: فرق 37 بكسل بين طرفي الكتفين عند حافتي القصّ
+    بعد تسوية العينين). لا تدوير واحد يسوّي الاثنين معاً، لذا نقيس خط
+    الكتفين كما يظهر في القصّ فعلاً — أعلى نقطة من صورة ظلّ الشخص عند
+    كل حافة جانبية تحت الذقن — وندير «الجسم فقط» من الرقبة إلى الأسفل
+    حول مركز الرقبة، بدمج ناعم عبر شريط الرقبة حتى لا يتحرك الرأس ولا
+    يظهر فاصل. حراس: زاوية بين 0.8° و6° وكتفان ظاهران عند الحافتين،
+    وإلا تُترك الصورة كما هي. أي فشل يعيد الأصل — تحسين لا يكسر الصنع.
+    """
+    try:
+        import math
+        if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
+            return bgra
+        h, w = bgra.shape[:2]
+        comp = composite_bg(bgra, (255, 255, 255), refine=False)
+        arr = cv2.cvtColor(np.array(comp), cv2.COLOR_RGB2BGR)
+        _pts, rect = _detect_face_lm(arr)
+        if rect is None:
+            return bgra
+        chin_y = float(rect[3])
+        face_cx = (float(rect[0]) + float(rect[2])) / 2.0
+        mask = bgra[:, :, 3] > 127
+        if not (mask[int(h * 0.98), :max(3, w // 4)].any()
+                and mask[int(h * 0.98), w - max(3, w // 4):].any()):
+            return bgra          # الكتفان غير ظاهرين حتى أسفل القصّ
+        ew = max(3, int(round(0.015 * w)))
+        y_lo = chin_y + 0.02 * h
+        y_hi = min(chin_y + 0.50 * h, h - 1)
+
+        def _tip_y(xa, xb):
+            sub = mask[:, xa:xb]
+            ys = np.where(sub.any(axis=1)
+                          & (np.arange(h) >= y_lo)
+                          & (np.arange(h) <= y_hi))[0]
+            return float(ys.min()) if len(ys) else None
+
+        ly = _tip_y(0, ew)
+        ry = _tip_y(w - ew, w)
+        if ly is None or ry is None:
+            return bgra
+        xl, xr = ew / 2.0, w - ew / 2.0
+        theta = math.degrees(math.atan2(ry - ly, xr - xl))
+        if abs(theta) < 0.8 or abs(theta) > 6.0:
+            return bgra
+        pivot = (face_cx, chin_y + 0.10 * h)
+        mat = cv2.getRotationMatrix2D(pivot, theta, 1.0)
+        rot = cv2.warpAffine(bgra, mat, (w, h), flags=cv2.INTER_CUBIC,
+                             borderMode=cv2.BORDER_CONSTANT,
+                             borderValue=(0, 0, 0, 0))
+        # دمج ناعم عبر الرقبة: فوق الشريط الأصل، تحته المدوَّر.
+        y0 = int(round(chin_y + 0.01 * h))
+        y1 = int(round(chin_y + 0.09 * h))
+        y0 = max(0, min(y0, h - 1))
+        y1 = max(y0 + 1, min(y1, h))
+        ramp = np.zeros((h, 1), np.float32)
+        ramp[y0:y1, 0] = np.linspace(0.0, 1.0, y1 - y0, dtype=np.float32)
+        ramp[y1:, 0] = 1.0
+        a = np.repeat(ramp, w, axis=1)[:, :, None]
+        out = (bgra.astype(np.float32) * (1.0 - a)
+               + rot.astype(np.float32) * a)
+        logger.info("Shoulder levelling: %.2f deg applied "
+                    "(edge tips dy %.0f px over %.0f px)",
+                    theta, ry - ly, xr - xl)
+        return np.clip(out, 0, 255).astype(np.uint8)
+    except Exception:
+        logger.exception("Shoulder levelling failed; keeping original")
+        return bgra
+
+
 def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
                 face_alignment: bool, roll0=None):
     """
@@ -966,6 +1039,10 @@ def hq_rerender(orig_bgr: np.ndarray, creator: IDCreator, size_hw,
         ctx2.face = {"rectangle": use_rect,
                      "roll_angle": roll}
         hd_a, _std_a, _clothing, _typo = adjust_photo(ctx2)
+        if face_alignment:
+            # تسوية الكتفين على القصّ النهائي: الجسم فقط يُدار من الرقبة،
+            # والرأس المستوي على العينين لا يُلمس.
+            hd_a = _level_shoulders_crop(hd_a)
         return hd_a
     except Exception:
         # لا تبتلع الفشل بصمت: مسار الجودة العالية هو الفرق بين قصّ حاد من
@@ -1157,9 +1234,11 @@ def save_jpg(img: Image.Image, path: str, target_kb: float = 0, dpi: int = DPI) 
 
 def build_sheet(tile: Image.Image, sheet_cfg, dpi: int = SHEET_DPI) -> Image.Image:
     """
-    تجميع النسخ على ورقة طباعة بقياس حقيقي:
-    توزيع متوازن — فراغات متساوية بين الصور وعند الحواف —
-    وخطوط قص رمادية تمتد من طرف الورقة إلى طرفها لتسهيل القص الدقيق.
+    تجميع النسخ على ورقة طباعة بقياس حقيقي — ترتيب ملتصق (v17):
+    الصور متلاصقة بلا أي فراغ بينها في كتلة واحدة وسط الورقة، فتُقصّ
+    بخطوط طويلة مستقيمة بدل القص حول كل صورة على حدة. لا يُرسم أي خط
+    على الصور نفسها؛ أدلة القص علامات قصيرة في الهامش الأبيض الخارجي
+    فقط، كل علامة مقابل خط قصّ ومن الجهتين المتقابلتين لضبط المسطرة.
 
     إعدادات الورقة محفوظة بوحدة بكسل عند 300 DPI. نكبر الورقة والبلاط معاً
     عند 600 DPI، لذلك تظل ورقة 10×15 أو 15×20 سم ومقاس كل صورة ثابتين
@@ -1172,28 +1251,39 @@ def build_sheet(tile: Image.Image, sheet_cfg, dpi: int = SHEET_DPI) -> Image.Ima
     (base_sheet_w, base_sheet_h), cols, rows = sheet_cfg
     sheet_w, sheet_h = round(base_sheet_w * scale), round(base_sheet_h * scale)
     tw, th = tile.size
-    if cols * tw > sheet_w or rows * th > sheet_h:
+    block_w, block_h = cols * tw, rows * th
+    if block_w > sheet_w or block_h > sheet_h:
         raise gr.Error(
             "مقاس الصورة المختار لا يتسع في ورقة الطباعة هذه. "
             "اختر ورقة أكبر أو قلّل المقاس المخصص."
         )
-    gap_x = (sheet_w - cols * tw) / (cols + 1)
-    gap_y = (sheet_h - rows * th) / (rows + 1)
-    xs = [round((i + 1) * gap_x + i * tw) for i in range(cols)]
-    ys = [round((j + 1) * gap_y + j * th) for j in range(rows)]
+    ox, oy = (sheet_w - block_w) // 2, (sheet_h - block_h) // 2
     sheet = Image.new("RGB", (sheet_w, sheet_h), (255, 255, 255))
-    for y in ys:
-        for x in xs:
-            sheet.paste(tile, (x, y))
-    draw = ImageDraw.Draw(sheet)
-    line = (176, 176, 176)
-    line_width = max(1, round(scale))
-    for x in xs:  # خطوط عمودية بطول الورقة كاملاً عند حدَّي كل صورة
-        draw.line([(x, 0), (x, sheet_h)], fill=line, width=line_width)
-        draw.line([(x + tw - 1, 0), (x + tw - 1, sheet_h)], fill=line, width=line_width)
-    for y in ys:  # خطوط أفقية بعرض الورقة كاملاً
-        draw.line([(0, y), (sheet_w, y)], fill=line, width=line_width)
-        draw.line([(0, y + th - 1), (sheet_w, y + th - 1)], fill=line, width=line_width)
+    for j in range(rows):
+        for i in range(cols):
+            sheet.paste(tile, (ox + i * tw, oy + j * th))
+    # علامات القص في الهامش الخارجي فقط — لا شيء يُرسم على الصور.
+    off = round(7 * scale)
+    tick_x = min(round(50 * scale), max(0, ox - off - 4))
+    tick_y = min(round(50 * scale), max(0, oy - off - 4))
+    if tick_x >= 8 and tick_y >= 8:
+        draw = ImageDraw.Draw(sheet)
+        tick_col = (110, 110, 110)
+        tick_w = max(2, round(1.5 * scale))
+        xb = [ox + i * tw for i in range(cols)] + [ox + block_w]
+        yb = [oy + j * th for j in range(rows)] + [oy + block_h]
+        for x in xb:  # علامات أعلى الكتلة وأسفلها عند كل خط قصّ عمودي
+            draw.line([(x, oy - off - tick_y), (x, oy - off)],
+                      fill=tick_col, width=tick_w)
+            draw.line([(x, oy + block_h + off),
+                       (x, oy + block_h + off + tick_y)],
+                      fill=tick_col, width=tick_w)
+        for y in yb:  # علامات يمين الكتلة ويسارها عند كل خط قصّ أفقي
+            draw.line([(ox - off - tick_x, y), (ox - off, y)],
+                      fill=tick_col, width=tick_w)
+            draw.line([(ox + block_w + off, y),
+                       (ox + block_w + off + tick_x, y)],
+                      fill=tick_col, width=tick_w)
     return sheet
 
 
